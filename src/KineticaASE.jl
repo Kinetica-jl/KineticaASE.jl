@@ -11,6 +11,7 @@ Constants = Kinetica.Constants
 using Logging
 using PythonCall
 using ExtXYZ
+using Glob
 
 const version = VersionNumber(0, 1, 0)
 
@@ -39,6 +40,9 @@ using .ASEConstants
 include("conversion.jl")
 export frame_to_atoms, atoms_to_frame
 
+include("calculator.jl")
+export ASENEBCalculator
+
 include("neb.jl")
 
 include("optimise.jl")
@@ -47,7 +51,7 @@ include("vibrations.jl")
 
 include("autode.jl")
 
-include("calculator.jl")
-export ASENEBCalculator
+include("builders.jl")
+export EMTBuilder, NWChemDFTBuilder
 
 end

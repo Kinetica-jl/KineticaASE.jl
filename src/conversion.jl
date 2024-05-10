@@ -1,12 +1,24 @@
 """
-    frame_to_atoms(frame)
+    frame_to_atoms(frame[, charges=nothing])
 
 Converts an ExtXYZ frame to an ASE Atoms object.
+
+If the optional argument `charges` is provided with an 
+integer array of formal charges on the atoms on `frame`,
+these will be applied to the resultIng Atoms object through
+`Atoms.set_initial_charges()`.
 """
-function frame_to_atoms(frame::Dict{String, Any})
+function frame_to_atoms(frame::Dict{String, Any}, charges=nothing)
     symbols = join(frame["arrays"]["species"])
     positions = frame["arrays"]["pos"]'
     atoms = ase.Atoms(symbols, positions=positions)
+    if !isnothing(charges)
+        if pylen(atoms) != length(charges)
+            throw(ArgumentError("Number of formal charges in `charges` must match number of atoms."))
+        else
+            atoms.set_initial_charges(charges)
+        end
+    end
     atoms.info = frame["info"]
     return atoms
 end
@@ -29,7 +41,7 @@ function atoms_to_frame(atoms::Py, ase_energy=nothing, inertias=nothing)
     frame = Dict{String, Any}(
         "N_atoms" => length(symbols),
         "arrays" => Dict{String, Any}(
-            "species" => species,
+            "species" => symbols,
             "pos" => positions
         ),
         "info" => pyconvert(Dict{String, Any}, atoms.info)

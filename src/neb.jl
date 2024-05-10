@@ -1,10 +1,30 @@
-function determine_rxn_spin()
-    throw(error("Not yet implemented!"))
+"""
+"""
+function get_rxn_mult(reacsys, prodsys)
+    n_reacs = reacsys["info"]["n_species"]
+    reac_mult = reacsys["info"]["mult"]
+    n_prods = prodsys["info"]["n_species"]
+    prod_mult = prodsys["info"]["mult"]
+
+    # Given an addition (2->1) or a dissociation (1->2), pick the lower mult.
+    if n_reacs > n_prods
+        return prod_mult
+    elseif n_reacs < n_prods
+        return reac_mult
+    # Given a substitution (2->2) or a rearrangement (1->1), 
+    # the mult should always be balanced.
+    else
+        if reac_mult != prod_mult
+            throw(ErrorException("Reaction has equal n_reacs and n_prods but mults do not match."))
+        else
+            return reac_mult
+        end
+    end
 end
 
 
 """
-    neb(reacsys, prodsys, calc::ASENEBCalculator)
+    neb(reacsys, prodsys, calc::ASENEBCalculator[, calcdir="./", kwargs...])
 
 Interpolates and runs (CI)NEB for the reaction defined by endpoints `reacsys` and `prodsys`.
 
@@ -28,17 +48,29 @@ only runs until `calc.maxiters` iterations have elapsed.
 Returns the optimised NEB path as a Python list of ASE
 Atoms objects.
 """
-function neb(reacsys, prodsys, calc::ASENEBCalculator)
-    @debug "Running $(calc.climb ? "CI-" : "")NEB calculation"
-    images = [[frame_to_atoms(reacsys) for _ in 1:calc.n_images]; [frame_to_atoms(prodsys)]]
-    for image in images
-        image.calc = calc.atoms_calc
+function neb(reacsys, prodsys, calc::ASENEBCalculator; calcdir="./", kwargs...)
+    @info "Running $(calc.climb ? "CI-" : "")NEB calculation"
+    images = [
+        [frame_to_atoms(reacsys, reacsys["info"]["formal_charges"]) for _ in 1:calc.n_images]; 
+        [frame_to_atoms(prodsys, prodsys["info"]["formal_charges"])]
+    ]
+
+    rmult = get_rxn_mult(reacsys, prodsys)
+    if calc.parallel
+        for image in images
+            image.calc = calc.calc_builder(calcdir, rmult, reacsys["info"]["chg"], kwargs...)
+        end
+    else
+        shared_calc = calc.calc_builder(calcdir, rmult, reacsys["info"]["chg"], kwargs...)
+        for image in images
+            image.calc = shared_calc
+        end
     end
     images = pylist(images)
+    neb = aseneb.NEB(images, k=calc.neb_k, parallel=calc.parallel, allow_shared_calculator=(!calc.parallel)) 
 
     @debug "Interpolating reaction path with method: $(calc.interpolation)"
     if calc.interpolation in ["linear", "idpp"]
-        neb = aseneb.NEB(images, k=calc.neb_k, allow_shared_calculator=true) 
         neb.interpolate(method=calc.interpolation)
     else
         throw(ErrorException("Unknown interpolation method. must be one of [\"linear\", \"idpp\"]"))
@@ -67,13 +99,15 @@ Checks whether a NEB calculation converged to the requested force tolerance `fto
 
 Mostly exists to output a debug message.
 """
-function is_neb_converged(images::Py, ftol)
-    final_fmax = pyconvert(Float64, aseneb.NEBTools(images).get_fmax())
+function is_neb_converged(images::Py, ftol, parallel::Bool)
+    final_fmax = pyconvert(Float64, 
+        aseneb.NEBTools(images).get_fmax(parallel=parallel, allow_shared_calculator=(!parallel))
+    )
     if final_fmax < ftol
-        @debug "NEB converged (fmax = $(final_fmax))"
+        @info "NEB converged (fmax = $(final_fmax))"
         return true
     else
-        @debug "NEB not converged (fmax = $(final_fmax))"
+        @info "NEB not converged (fmax = $(final_fmax))"
         return false
     end
 end
@@ -94,5 +128,6 @@ function highest_energy_frame(images::Py)
     @debug "TS found at image $(ts_idx)/$(pylen(images))"
     inertias = pyconvert(Vector{Float64}, images[ts_idx-1].get_moments_of_inertia())
     ts = atoms_to_frame(images[ts_idx-1], energies[ts_idx], inertias)
+    ts["info"]["formal_charges"] = pyconvert(Vector{Float64}, images[ts_idx-1].get_initial_charges())
     return ts
 end
