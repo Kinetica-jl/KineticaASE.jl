@@ -145,8 +145,8 @@ translation and rotation. Uses the Kabsch algorithm, as
 implemented in the Python package 'rmsd'.
 """
 function kabsch_fit!(frame1::Dict{String, Any}, frame2::Dict{String, Any})
-    c1 = Py(frame1["arrays"]["pos"]).to_numpy()
-    c2 = Py(frame2["arrays"]["pos"]).to_numpy()
-    frame1["arrays"]["pos"] = pyconvert(Matrix, rmsd.kabsch_fit(c1, c2))
+    c1 = Py(frame1["arrays"]["pos"]).to_numpy().T
+    c2 = Py(frame2["arrays"]["pos"]).to_numpy().T
+    frame1["arrays"]["pos"] = pyconvert(Matrix, rmsd.kabsch_fit(c1, c2).T)
     return
 end
