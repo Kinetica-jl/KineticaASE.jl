@@ -139,7 +139,9 @@ function safe_geomopt!(frame::Dict{String, Any}, calc_builder;
             frame["info"]["inertias"] = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
         end
     else
-        @debug "Geometry optimisation failed."
+        @warn "Geometry optimisation failed."
+        frame["info"]["energy_ASE"] = init_energy
+        frame["info"]["inertias"] = init_inertias
     end
     return success
 end
