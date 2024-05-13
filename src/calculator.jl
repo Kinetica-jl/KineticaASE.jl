@@ -166,7 +166,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             reacsys_smi = join([sd.toStr[sid] for sid in reac_sids], ".")
             formal_charges = get_formal_charges(atom_map_smiles(reacsys, reacsys_smi))
             safe_geomopt!(reacsys, calc.calc_builder; calcdir=nebdir, mult=reacsys["info"]["mult"], 
-                          chg=reacsys["info"]["chg"], formal_charges=formal_charges)
+                          chg=reacsys["info"]["chg"], formal_charges=formal_charges, maxiters=calc.maxiters)
         else
             sid = rd.id_reacs[i][1]
             reacsys = sd.xyz[sid]
@@ -190,7 +190,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             prodsys_smi = join([sd.toStr[sid] for sid in prod_sids], ".")
             formal_charges = get_formal_charges(atom_map_smiles(prodsys, prodsys_smi))
             safe_geomopt!(prodsys, calc.calc_builder; calcdir=nebdir, mult=prodsys["info"]["mult"], 
-                          chg=prodsys["info"]["chg"], formal_charges=formal_charges)
+                          chg=prodsys["info"]["chg"], formal_charges=formal_charges, maxiters=calc.maxiters)
         else
             sid = rd.id_prods[i][1]
             if sd.cache[:charge][sid] != reacsys["info"]["chg"]
@@ -219,11 +219,11 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         @info "Completed Kabsch fit of product system onto reactant system."
 
         # Interpolate and run NEB.
-        images = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
+        images, success = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
         # Save to caches.
         # If unconverged and removal is requested, push blank
         # entries to caches so splice! still works at the end.
-        if is_neb_converged(images, calc.ftol, calc.parallel) || !(calc.remove_unconverged)
+        if success || !(calc.remove_unconverged)
             ts = highest_energy_frame(images)
 
             push!(calc.ts_cache[:xyz], ts)

@@ -75,41 +75,35 @@ function neb(reacsys, prodsys, calc::ASENEBCalculator; calcdir="./", kwargs...)
     else
         throw(ErrorException("Unknown interpolation method. must be one of [\"linear\", \"idpp\"]"))
     end
+    aseio.write(joinpath(calcdir, "interp.traj"), images)
 
-    opt = aseopt.FIRE(neb)
+    # opt = aseopt.FIRE(neb)
+    opt = aseneb.NEBOptimizer(neb, verbose=1)
     if calc.climb
         @debug "Running NEB to tolerance of $(calc.climb_ftol) before enabling CI"
-        opt.run(fmax=calc.climb_ftol, steps=calc.maxiters)
-        @debug "Running CI-NEB to tolerance of $(calc.ftol)"
-        neb.climb = true
-        opt.run(fmax=calc.ftol, steps=calc.maxiters)
+        success = opt.run(fmax=calc.climb_ftol, steps=calc.maxiters)
+        success = pyconvert(Bool, pybuiltins.bool(success))
+        if success
+            @debug "Running CI-NEB to tolerance of $(calc.ftol)"
+            neb.climb = true
+            success = opt.run(fmax=calc.ftol, steps=calc.maxiters)
+            success = pyconvert(Bool, pybuiltins.bool(success))
+        end
     else
         @debug "Running NEB to tolerance of $(calc.ftol)"
-        opt.run(fmax=calc.ftol, steps=calc.maxiters)
+        success = opt.run(fmax=calc.ftol, steps=calc.maxiters)
+        success = pyconvert(Bool, pybuiltins.bool(success))
     end
+    aseio.write(joinpath(calcdir, "neb_final.traj"), images)
 
-    return images
-end
-
-
-"""
-    is_neb_converged(images::Py, ftol)
-
-Checks whether a NEB calculation converged to the requested force tolerance `ftol`.
-
-Mostly exists to output a debug message.
-"""
-function is_neb_converged(images::Py, ftol, parallel::Bool)
-    final_fmax = pyconvert(Float64, 
-        aseneb.NEBTools(images).get_fmax(parallel=parallel, allow_shared_calculator=(!parallel))
-    )
-    if final_fmax < ftol
+    final_fmax = pyconvert(Float64, neb.get_residual())
+    if success
         @info "NEB converged (fmax = $(final_fmax))"
-        return true
     else
         @info "NEB not converged (fmax = $(final_fmax))"
-        return false
     end
+
+    return images, success
 end
 
 """
