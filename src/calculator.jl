@@ -107,7 +107,10 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             get_charge!(sd, i) 
             autode_conformer_search!(sd, i)
             get_formal_charges!(sd, i)
-            geomopt!(sd, i, calc.calc_builder)
+            success = geomopt!(sd, i, calc.calc_builder; maxiters=calc.maxiters)
+            if !success
+                @warn "Optimisation of species $i ($(sd.toStr[i])) failed to converge!"
+            end
             cd(currdir)
         end
     end
