@@ -12,6 +12,7 @@ using Logging
 using PythonCall
 using ExtXYZ
 using Glob
+using StableHashTraits
 
 const version = VersionNumber(0, 1, 0)
 

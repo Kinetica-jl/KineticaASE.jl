@@ -50,3 +50,28 @@ function atoms_to_frame(atoms::Py, ase_energy=nothing, inertias=nothing)
     if !isnothing(inertias) frame["info"]["inertias"] = inertias end
     return frame
 end
+
+
+"""
+"""
+function get_reverse_rhash(sd::SpeciesData, rd::RxData, rid)
+    reacs = []
+    for (i, sid) in enumerate(rd.id_reacs[rid])
+        for _ in 1:rd.stoic_reacs[rid][i] 
+            push!(reacs, sd.toStr[sid])
+        end
+    end
+    sort!(reacs)
+    prods = []
+    for (i, sid) in enumerate(rd.id_prods[rid])
+        for _ in 1:rd.stoic_prods[rid][i] 
+            push!(prods, sd.toStr[sid])
+        end
+    end
+    sort!(prods)
+
+    forw_rhash = stable_hash(vcat(reacs, prods))
+    @assert rd.rhash[rid] == forw_rhash
+    rev_rhash = stable_hash(vcat(prods, reacs))
+    return rev_rhash
+end

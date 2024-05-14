@@ -128,9 +128,9 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         # Copy TS info if reverse reaction has been cached.
         # Reactants/products don't need to be changed because they
         # are covered by the reverse reaction.
-        reverse_mapped_rxn = join(reverse(split(rd.mapped_rxns[i], ">>")), ">>")
-        if reverse_mapped_rxn in rd.mapped_rxns
-            reverse_idx = findfirst(==(reverse_mapped_rxn), rd.mapped_rxns)
+        reverse_rhash = get_reverse_rhash(sd, rd, i)
+        if reverse_rhash in rd.rhash
+            reverse_idx = findfirst(==(reverse_rhash), rd.rhash)
             if calc.cached_rids[reverse_idx] && calc.ts_cache[:symmetry][reverse_idx] > -1 
                 push!(calc.ts_cache[:xyz], calc.ts_cache[:xyz][reverse_idx])
                 push!(calc.ts_cache[:vib_energies], calc.ts_cache[:vib_energies][reverse_idx])
@@ -248,6 +248,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             @info "Completed vibrational analysis.\n"
         else
             push!(calc.ts_cache[:xyz], Dict{String, Any}())
+            push!(calc.ts_cache[:vib_energies], [0.0+0.0im])
             push!(calc.ts_cache[:symmetry], -1)
             push!(calc.ts_cache[:geometry], -1)
             push!(calc.ts_cache[:reacsys_energies], 0.0)
@@ -258,6 +259,27 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
 
         calc.cached_rids[i] = true
         cd(currdir)
+    end
+
+    # Check all unconverged reactions for converged reverse pairs.
+    # Copy the reverse TS if a converged pair is found.
+    unconverged_rids = findall(==(-1), calc.ts_cache[:symmetry])
+    for i in unconverged_rids
+        reverse_rhash = get_reverse_rhash(sd, rd, i)
+        if reverse_rhash in rd.rhash
+            reverse_idx = findfirst(==(reverse_rhash), rd.rhash)
+            if calc.ts_cache[:symmetry][reverse_idx] > -1 
+                calc.ts_cache[:xyz][i] = calc.ts_cache[:xyz][reverse_idx]
+                calc.ts_cache[:vib_energies][i] = calc.ts_cache[:vib_energies][reverse_idx]
+                calc.ts_cache[:symmetry][i] = calc.ts_cache[:symmetry][reverse_idx]
+                calc.ts_cache[:geometry][i] = calc.ts_cache[:geometry][reverse_idx]
+                calc.ts_cache[:reacsys_energies][i] = calc.ts_cache[:prodsys_energies][reverse_idx]
+                calc.ts_cache[:prodsys_energies][i] = calc.ts_cache[:reacsys_energies][reverse_idx]
+                calc.ts_cache[:mult][i] = calc.ts_cache[:mult][reverse_idx]
+                calc.ts_cache[:charge][i] = calc.ts_cache[:charge][reverse_idx]
+                @info "Found a converged reverse reaction for RID $i, copied TS data."
+            end
+        end
     end
 
     # Find all reactions that need to be removed from negative
