@@ -12,6 +12,7 @@ mutable struct ASENEBCalculator{kmType, tType} <: Kinetica.AbstractKineticCalcul
     n_images::Int
     parallel::Bool
     remove_unconverged::Bool
+    imaginary_freq_tol
     k_max::kmType
     t_unit::String
     t_mult::tType
@@ -22,13 +23,17 @@ mutable struct ASENEBCalculator{kmType, tType} <: Kinetica.AbstractKineticCalcul
 end
 
 """
-    ASENEBCalculator(calc_builder, calcdir_head[, neb_k, ftol, climb, climb_ftol, maxiters, interpolation, n_images, parallel, remove_unconverged, k_max, t_unit])
+    ASENEBCalculator(calc_builder, calcdir_head[, 
+        neb_k, ftol, climb, climb_ftol, maxiters,
+        interpolation, n_images, parallel, 
+        remove_unconverged, imaginary_freq_tol,
+        k_max, t_unit])
 
 Outer constructor method for ASE-driven NEB-based kinetic calculator.
 """
 function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, climb::Bool=true, climb_ftol=0.1,
                           maxiters=500, interpolation::String="idpp", n_images=11, parallel::Bool=false, 
-                          remove_unconverged::Bool=true, k_max::Union{Nothing, uType}=nothing, 
+                          remove_unconverged::Bool=true, imaginary_freq_tol=1e-2, k_max::Union{Nothing, uType}=nothing, 
                           t_unit::String="s") where {uType <: AbstractFloat}
 
     # Ensure autodE can get to XTB
@@ -56,8 +61,8 @@ function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, clim
     )
     sd_blank, rd_blank = init_network()
     return ASENEBCalculator(calc_builder, calcdir_head, neb_k, ftol, climb, climb_ftol, maxiters, 
-                            interpolation, n_images, parallel, remove_unconverged, k_max, 
-                            t_unit, t_mult, cached_rids, ts_cache, sd_blank, rd_blank)
+                            interpolation, n_images, parallel, remove_unconverged, imaginary_freq_tol,
+                            k_max, t_unit, t_mult, cached_rids, ts_cache, sd_blank, rd_blank)
 end
 
 """
@@ -124,6 +129,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         if calc.cached_rids[i] continue end
         @info "---------------------------------\nReaction $i\n---------------------------------"
         @info format_rxn(sd, rd, i)
+        @debug rd.mapped_rxns[i]
 
         # Copy TS info if reverse reaction has been cached.
         # Reactants/products don't need to be changed because they
@@ -240,14 +246,16 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
 
             # Run individual vibrational analyses on reactants, products
             # and TS.
+            ivetol = imaginary_ve_tol(calc.imaginary_freq_tol)
             for rid in rd.id_reacs[i]
-                calc_species_vibrations!(sd, rid, calc.calc_builder; calcdir=nebdir)
+                calc_species_vibrations!(sd, rid, calc.calc_builder; calcdir=nebdir, ivetol=ivetol)
             end
             for pid in rd.id_prods[i]
-                calc_species_vibrations!(sd, pid, calc.calc_builder; calcdir=nebdir)
+                calc_species_vibrations!(sd, pid, calc.calc_builder; calcdir=nebdir, ivetol=ivetol)
             end
-            calc_ts_vibrations!(calc.ts_cache, i, calc.calc_builder; calcdir=nebdir)
-            @info "Completed vibrational analysis.\n"
+            calc_ts_vibrations!(calc.ts_cache, i, calc.calc_builder; calcdir=nebdir, ivetol=ivetol)
+            @info "Completed vibrational analysis."
+            @info ""
         else
             push!(calc.ts_cache[:xyz], Dict{String, Any}())
             push!(calc.ts_cache[:vib_energies], [0.0+0.0im])

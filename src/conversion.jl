@@ -75,3 +75,10 @@ function get_reverse_rhash(sd::SpeciesData, rd::RxData, rid)
     rev_rhash = stable_hash(vcat(prods, reacs))
     return rev_rhash
 end
+
+
+"""
+"""
+function imaginary_ve_tol(imaginary_freq_tol)
+    return (imaginary_freq_tol^-0.5) * ASEConstants.hbar * ASEConstants.m / sqrt(ASEConstants.e * ASEConstants.amu)
+end
