@@ -7,18 +7,19 @@ function get_rxn_mult(reacsys, prodsys)
     prod_mult = prodsys["info"]["mult"]
 
     # Given an addition (2->1) or a dissociation (1->2), pick the lower mult.
+    # Given a substitution (2->2) or a rearrangement (1->1), 
+    # the mult should always be balanced.
+    # However, abstractions from radicals can lead to
+    # unbalanced mult, e.g. [CH2]C + [H] --> C=C + [H][H],
+    # in which case the lower mult should be taken.
     if n_reacs > n_prods
         return prod_mult
     elseif n_reacs < n_prods
         return reac_mult
-    # Given a substitution (2->2) or a rearrangement (1->1), 
-    # the mult should always be balanced.
+    elseif n_reacs == n_prods > 1
+        return min(reac_mult, prod_mult)
     else
-        if reac_mult != prod_mult
-            throw(ErrorException("Reaction has equal n_reacs and n_prods but mults do not match."))
-        else
-            return reac_mult
-        end
+        throw(ErrorException("Reaction has one reactant and one product but mults do not match."))
     end
 end
 
@@ -51,7 +52,7 @@ Atoms objects.
 function neb(reacsys, prodsys, calc::ASENEBCalculator; calcdir="./", kwargs...)
     @info "Running $(calc.climb ? "CI-" : "")NEB calculation"
     images = [
-        [frame_to_atoms(reacsys, reacsys["info"]["formal_charges"]) for _ in 1:calc.n_images]; 
+        [frame_to_atoms(reacsys, reacsys["info"]["formal_charges"]) for _ in 1:calc.n_images-1]; 
         [frame_to_atoms(prodsys, prodsys["info"]["formal_charges"])]
     ]
 
