@@ -177,3 +177,71 @@ function kabsch_fit!(frame1::Dict{String, Any}, frame2::Dict{String, Any})
     frame1["arrays"]["pos"] = pyconvert(Matrix, rmsd.kabsch_fit(c1, c2).T)
     return
 end
+
+
+"""
+"""
+function get_hydrogen_idxs(amsmi::String)
+    at_end = false
+    i = 1
+    nc = length(amsmi)
+    hidxs = [Int[]]
+    while !at_end
+        if amsmi[i] == '['
+            sym = amsmi[i+1]
+            idx = parse(Int, string(amsmi[i+3]))
+            if sym == 'H'
+                push!(hidxs[end], idx)
+            end
+            i += 5
+        elseif amsmi[i] == '.'
+            push!(hidxs, Int[])
+            i += 1
+        else
+            i += 1
+        end
+        if i > nc at_end = true end
+    end
+    return hidxs
+end
+
+
+"""
+"""
+function permute_hydrogens!(frame1::Dict{String, Any}, hidxs::Vector{Vector{Int}}, frame2::Dict{String, Any})
+    c1 = Py(frame1["arrays"]["pos"]).to_numpy().T
+    c2 = Py(frame2["arrays"]["pos"]).to_numpy().T
+
+    if length(reduce(vcat, hidxs)) > 1
+        best_pos = c1.copy()
+        best_rmsd = pyconvert(Float64, rmsd.kabsch_rmsd(best_pos, c2))
+        swapping = true
+        while swapping
+            has_swapped = false
+            for hidxs_mol in hidxs
+                if length(hidxs_mol) < 2 continue end
+                for i in 1:length(hidxs_mol)-1
+                    for j in 2:length(hidxs_mol)
+                        swap_pos = best_pos.copy()
+                        swap_pos[hidxs_mol[i]-1] = best_pos[hidxs_mol[j]-1]
+                        swap_pos[hidxs_mol[j]-1] = best_pos[hidxs_mol[i]-1]
+                        swap_rmsd = pyconvert(Float64, rmsd.kabsch_rmsd(swap_pos, c2))
+                        if swap_rmsd < best_rmsd
+                            @debug "Swapped H$(hidxs_mol[i]) for H$(hidxs_mol[j])"
+                            best_pos = swap_pos
+                            best_rmsd = swap_rmsd
+                            has_swapped = true
+                        end
+                    end
+                end
+            end
+            if !has_swapped
+                swapping = false
+            end
+        end
+        c1 = rmsd.kabsch_fit(best_pos, c2)
+    end
+
+    frame1["arrays"]["pos"] = pyconvert(Matrix, c1.T)
+    return
+end

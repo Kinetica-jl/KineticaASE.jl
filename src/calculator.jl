@@ -217,6 +217,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         # Kabsch fit product system onto reactant system.
         kabsch_fit!(prodsys_mapped, reacsys_mapped)
         @info "Completed Kabsch fit of product system onto reactant system."
+        permute_hydrogens!(prodsys_mapped, get_hydrogen_idxs(prod_map), reacsys_mapped)
 
         # Interpolate and run NEB.
         images, conv = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
