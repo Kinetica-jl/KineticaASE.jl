@@ -225,16 +225,17 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         # entries to caches so splice! still works at the end.
         if conv || !(calc.remove_unconverged)
             ts = highest_energy_frame(images)
+            rxn_mult = get_rxn_mult(reacsys_mapped, prodsys_mapped)
 
             push!(calc.ts_cache[:xyz], ts)
-            ts_sym, ts_geom = autode_frame_symmetry(ts)
+            push!(calc.ts_cache[:mult], rxn_mult)
+            push!(calc.ts_cache[:charge], prodsys_mapped["info"]["chg"])
+            ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rxn_mult, chg=prodsys_mapped["info"]["chg"])
             push!(calc.ts_cache[:symmetry], ts_sym)
             push!(calc.ts_cache[:geometry], ts_geom)
             rd.dH[i] = (prodsys_mapped["info"]["energy_ASE"] - reacsys_mapped["info"]["energy_ASE"]) * Constants.eV_to_kcal_per_mol
             push!(calc.ts_cache[:reacsys_energies], reacsys_mapped["info"]["energy_ASE"])
             push!(calc.ts_cache[:prodsys_energies], prodsys_mapped["info"]["energy_ASE"])
-            push!(calc.ts_cache[:mult], get_rxn_mult(reacsys_mapped, prodsys_mapped))
-            push!(calc.ts_cache[:charge], prodsys_mapped["info"]["chg"])
 
             # Run individual vibrational analyses on reactants, products
             # and TS.

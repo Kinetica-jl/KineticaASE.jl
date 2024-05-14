@@ -160,8 +160,8 @@ end
 
 """
 """
-function autode_frame_symmetry(frame::Dict{String, Any})
-    mol = frame_to_autode(frame)
+function autode_frame_symmetry(frame::Dict{String, Any}; mult::Int=1, chg::Int=0)
+    mol = frame_to_autode(frame; mult=mult, chg=chg)
     sym = pyconvert(Int, mol.symmetry_number)
     if pyconvert(Bool, mol.is_linear())
         geom = 1
