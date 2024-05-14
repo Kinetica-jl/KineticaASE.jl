@@ -73,15 +73,15 @@ controlled with this method's keyword arguments.
 
 Directly modifies the atomic positions and energy of the
 passed in `frame`. Energies returned are in eV. Returns a
-boolean for whether the optimisation was a success.
+boolean for whether the optimisation was a conv.
 """
 function geomopt!(sd::SpeciesData, i, calc_builder; calcdir::String="./", fmax=0.01, maxiters=nothing, kwargs...)
     frame = sd.xyz[i]
-    success = geomopt!(frame, calc_builder; calcdir=calcdir, mult=sd.cache[:mult][i], chg=sd.cache[:charge][i],
+    conv = geomopt!(frame, calc_builder; calcdir=calcdir, mult=sd.cache[:mult][i], chg=sd.cache[:charge][i],
                        formal_charges=sd.cache[:formal_charges][i], fmax=fmax, maxiters=maxiters,
                        kwargs...)
     sd.xyz[i] = frame
-    return success
+    return conv
 end
 
 function geomopt!(frame::Dict{String, Any}, calc_builder; 
@@ -91,18 +91,28 @@ function geomopt!(frame::Dict{String, Any}, calc_builder;
     @debug "Starting geometry optimisation."
     atoms = frame_to_atoms(frame, formal_charges)
     atoms.calc = calc_builder(calcdir, mult, chg, kwargs...)
-    opt = aseopt.QuasiNewton(atoms)
-    success = opt.run(fmax=fmax, steps=maxiters)
-    success = pyconvert(Bool, pybuiltins.bool(success))
-    if success
+    init_energy = pyconvert(Float64, atoms.get_potential_energy())
+    init_inertias = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
+
+    opt = aseopt.QuasiNewton(atoms); conv = false
+    try
+        conv = opt.run(fmax=fmax, steps=maxiters)
+        conv = pyconvert(Bool, pybuiltins.bool(conv))
+    catch err
+        conv = false
+    end
+
+    if conv
         @debug "Geometry optimisation complete."
         frame["arrays"]["pos"] = pyconvert(Matrix, atoms.get_positions().T)
         frame["info"]["energy_ASE"] = pyconvert(Float64, atoms.get_potential_energy())
         frame["info"]["inertias"] = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
     else
         @debug "Geometry optimisation failed."
+        frame["info"]["energy_ASE"] = init_energy
+        frame["info"]["inertias"] = init_inertias
     end
-    return success
+    return conv
 end
 
 
@@ -120,10 +130,15 @@ function safe_geomopt!(frame::Dict{String, Any}, calc_builder;
     init_energy = pyconvert(Float64, atoms.get_potential_energy())
     init_inertias = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
 
-    opt = aseopt.QuasiNewton(atoms)
-    success = opt.run(fmax=fmax, steps=maxiters)
-    success = pyconvert(Bool, pybuiltins.bool(success))
-    if success
+    opt = aseopt.QuasiNewton(atoms); conv = false
+    try
+        conv = opt.run(fmax=fmax, steps=maxiters)
+        conv = pyconvert(Bool, pybuiltins.bool(conv))
+    catch err
+        conv = false
+    end
+
+    if conv
         @debug "Geometry optimisation complete."
         optframe = atoms_to_frame(atoms, pyconvert(Float64, atoms.get_potential_energy()), 
                                 pyconvert(Vector{Float64}, atoms.get_moments_of_inertia()))
@@ -132,7 +147,7 @@ function safe_geomopt!(frame::Dict{String, Any}, calc_builder;
             @warn "Optimised geometry invalidates molecular graph, reverting to unoptimised geometry."
             frame["info"]["energy_ASE"] = init_energy
             frame["info"]["inertias"] = init_inertias
-            success = false
+            conv = false
         else
             frame["arrays"]["pos"] = pyconvert(Matrix, atoms.get_positions().T)
             frame["info"]["energy_ASE"] = pyconvert(Float64, atoms.get_potential_energy())
@@ -143,7 +158,7 @@ function safe_geomopt!(frame::Dict{String, Any}, calc_builder;
         frame["info"]["energy_ASE"] = init_energy
         frame["info"]["inertias"] = init_inertias
     end
-    return success
+    return conv
 end
 
 """

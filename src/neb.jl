@@ -81,29 +81,29 @@ function neb(reacsys, prodsys, calc::ASENEBCalculator; calcdir="./", kwargs...)
     opt = aseneb.NEBOptimizer(neb, verbose=1)
     if calc.climb
         @debug "Running NEB to tolerance of $(calc.climb_ftol) before enabling CI"
-        success = opt.run(fmax=calc.climb_ftol, steps=calc.maxiters)
-        success = pyconvert(Bool, pybuiltins.bool(success))
-        if success
+        conv = opt.run(fmax=calc.climb_ftol, steps=calc.maxiters)
+        conv = pyconvert(Bool, pybuiltins.bool(conv))
+        if conv
             @debug "Running CI-NEB to tolerance of $(calc.ftol)"
             neb.climb = true
-            success = opt.run(fmax=calc.ftol, steps=calc.maxiters)
-            success = pyconvert(Bool, pybuiltins.bool(success))
+            conv = opt.run(fmax=calc.ftol, steps=calc.maxiters)
+            conv = pyconvert(Bool, pybuiltins.bool(conv))
         end
     else
         @debug "Running NEB to tolerance of $(calc.ftol)"
-        success = opt.run(fmax=calc.ftol, steps=calc.maxiters)
-        success = pyconvert(Bool, pybuiltins.bool(success))
+        conv = opt.run(fmax=calc.ftol, steps=calc.maxiters)
+        conv = pyconvert(Bool, pybuiltins.bool(conv))
     end
     aseio.write(joinpath(calcdir, "neb_final.traj"), images)
 
-    final_fmax = pyconvert(Float64, neb.get_residual())
-    if success
+    final_fmax = pyconvert(Float64, opt.get_residual())
+    if conv
         @info "NEB converged (fmax = $(final_fmax))"
     else
         @info "NEB not converged (fmax = $(final_fmax))"
     end
 
-    return images, success
+    return images, conv
 end
 
 """

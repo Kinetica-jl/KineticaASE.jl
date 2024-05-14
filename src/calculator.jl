@@ -107,8 +107,8 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             get_charge!(sd, i) 
             autode_conformer_search!(sd, i)
             get_formal_charges!(sd, i)
-            success = geomopt!(sd, i, calc.calc_builder; maxiters=calc.maxiters)
-            if !success
+            conv = geomopt!(sd, i, calc.calc_builder; maxiters=calc.maxiters)
+            if !conv
                 @warn "Optimisation of species $i ($(sd.toStr[i])) failed to converge!"
             end
             cd(currdir)
@@ -219,11 +219,11 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         @info "Completed Kabsch fit of product system onto reactant system."
 
         # Interpolate and run NEB.
-        images, success = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
+        images, conv = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
         # Save to caches.
         # If unconverged and removal is requested, push blank
         # entries to caches so splice! still works at the end.
-        if success || !(calc.remove_unconverged)
+        if conv || !(calc.remove_unconverged)
             ts = highest_energy_frame(images)
 
             push!(calc.ts_cache[:xyz], ts)
