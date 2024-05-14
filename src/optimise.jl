@@ -78,8 +78,8 @@ boolean for whether the optimisation was a conv.
 function geomopt!(sd::SpeciesData, i, calc_builder; calcdir::String="./", fmax=0.01, maxiters=nothing, kwargs...)
     frame = sd.xyz[i]
     conv = geomopt!(frame, calc_builder; calcdir=calcdir, mult=sd.cache[:mult][i], chg=sd.cache[:charge][i],
-                       formal_charges=sd.cache[:formal_charges][i], fmax=fmax, maxiters=maxiters,
-                       kwargs...)
+                    formal_charges=sd.cache[:formal_charges][i], fmax=fmax, maxiters=maxiters,
+                    kwargs...)
     sd.xyz[i] = frame
     return conv
 end
@@ -94,10 +94,22 @@ function geomopt!(frame::Dict{String, Any}, calc_builder;
     init_energy = pyconvert(Float64, atoms.get_potential_energy())
     init_inertias = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
 
-    opt = aseopt.QuasiNewton(atoms); conv = false
+    # Optimise with Python exception catching.
+    # Also check forces when 10% of the way in to Ensure
+    # system has not exploded beyond repair.
+    opt = aseopt.QuasiNewton(atoms); 
+    conv = false; checkiters = Int(floor(maxiters/10))
     try
-        conv = opt.run(fmax=fmax, steps=maxiters)
+        conv = opt.run(fmax=fmax, steps=checkiters)
         conv = pyconvert(Bool, pybuiltins.bool(conv))
+        if !conv
+            if pyconvert(Float64, opt.get_residual()) > 1e5
+                @debug "Optimisation has exploded."
+            else
+                conv = opt.run(fmax=fmax, steps=maxiters-checkiters)
+                conv = pyconvert(Bool, pybuiltins.bool(conv))
+            end
+        end
     catch err
         conv = false
     end
@@ -130,10 +142,19 @@ function safe_geomopt!(frame::Dict{String, Any}, calc_builder;
     init_energy = pyconvert(Float64, atoms.get_potential_energy())
     init_inertias = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
 
-    opt = aseopt.QuasiNewton(atoms); conv = false
+    opt = aseopt.QuasiNewton(atoms); 
+    conv = false; checkiters = Int(floor(maxiters/10))
     try
-        conv = opt.run(fmax=fmax, steps=maxiters)
+        conv = opt.run(fmax=fmax, steps=checkiters)
         conv = pyconvert(Bool, pybuiltins.bool(conv))
+        if !conv
+            if pyconvert(Float64, opt.get_residual()) > 1e5
+                @debug "Optimisation has exploded."
+            else
+                conv = opt.run(fmax=fmax, steps=maxiters-checkiters)
+                conv = pyconvert(Bool, pybuiltins.bool(conv))
+            end
+        end
     catch err
         conv = false
     end
