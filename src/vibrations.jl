@@ -1,5 +1,5 @@
 """
-    calc_species_vibrations(sd::SpeciesData, sid, calc_builder[, calcdir="./", refresh=false, ivetol=0.1, kwargs...])
+    calc_species_vibrations(sd::SpeciesData, sid, calc_builder[, calcdir="./", refresh=false, delta=0.01, ivetol=0.1, kwargs...])
 
 Calculates vibrational energies of a species.
 
@@ -13,8 +13,13 @@ Writes the vibrational energies in eV as an array into
 already calculated vibrational energies for a species,
 instead returnong immediately. If recalculations are
 desired, use `refresh=true`. 
+
+If a species has imaginary frequencies, these can be
+ignored below a threshold `ivetol`, which removes them
+from the final vibrational energy array. All imaginary
+frequencies can be ignored by passing `ivetol=0.0`.
 """
-function calc_species_vibrations!(sd::SpeciesData, sid, calc_builder; calcdir::String="./", refresh=false, ivetol=0.1, kwargs...)
+function calc_species_vibrations!(sd::SpeciesData, sid, calc_builder; calcdir::String="./", refresh=false, delta=0.01, ivetol=0.1, kwargs...)
     if sid in keys(sd.cache[:vib_energies]) && !(refresh)
         @debug "Species $sid has vibrations cached, skipping."
         return
@@ -31,7 +36,7 @@ function calc_species_vibrations!(sd::SpeciesData, sid, calc_builder; calcdir::S
 
     vibdir = joinpath(calcdir, "vib")
     if !(isdir(vibdir)) mkdir(vibdir) end
-    vib = asevib.Vibrations(atoms)
+    vib = asevib.Vibrations(atoms, delta=delta)
     vib.run()
     vib_energies = vib.get_energies()
     @debug "vib_energies = $(vib_energies)"
@@ -44,18 +49,28 @@ function calc_species_vibrations!(sd::SpeciesData, sid, calc_builder; calcdir::S
     end
     jlve = pyconvert(Vector{ComplexF64}, vib_energies)
     @debug "vib_energies (reduced) = $jlve"
-    if any([z.im > ivetol for z in jlve])
-        throw(ErrorException("Imaginary frequency detected in geometry of species $sid."))
+
+    if ivetol <= 0.0
+        n_ve = length(jlve)
+        jlve = [z.re for z in jlve if z.re > 0.0]
+        n_ive = n_ve - length(jlve)
+        if n_ive > 0 @debug "Removed $(n_ive) imaginary modes." end
     else
-        jlve = [z.re for z in jlve]
+        if any([z.im > ivetol for z in jlve])
+            throw(ErrorException("Imaginary frequency detected in geometry of species $sid."))
+        else
+            jlve = [z.re for z in jlve if z.re > 0.0]
+        end
     end
+    @debug "vib_energies (processed) = $jlve"
+
     sd.cache[:vib_energies][sid] = jlve
     rm(vibdir, recursive=true)
     return
 end
 
 """
-    calc_ts_vibrations(ts_cache::Dict{Symbol, Any}, rid, calc_builder[, calcdir="./", ivetol=0.1, kwargs...])
+    calc_ts_vibrations(ts_cache::Dict{Symbol, Any}, rid, calc_builder[, calcdir="./", delta=0.01, ivetol=0.1, kwargs...])
 
 Calculates vibrational energies of a transition state.
 
@@ -67,13 +82,13 @@ calculator constructed through `calc_builder`.
 Writes the vibrational energies in eV as an array into 
 `ts_cache[:vib_energies]`.
 """
-function calc_ts_vibrations!(ts_cache::Dict{Symbol, Any}, rid, calc_builder; calcdir::String="./", ivetol=0.1, kwargs...)
+function calc_ts_vibrations!(ts_cache::Dict{Symbol, Any}, rid, calc_builder; calcdir::String="./", delta=0.01, ivetol=0.1, kwargs...)
     atoms = frame_to_atoms(ts_cache[:xyz][rid], ts_cache[:xyz][rid]["info"]["formal_charges"])
     atoms.calc = calc_builder(calcdir, ts_cache[:mult][rid], ts_cache[:charge][rid], kwargs...)
 
     vibdir = joinpath(calcdir, "vib")
     if !(isdir(vibdir)) mkdir(vibdir) end
-    vib = asevib.Vibrations(atoms)
+    vib = asevib.Vibrations(atoms, delta=delta)
     vib.run()
     vib_energies = vib.get_energies()
     @debug "vib_energies = $(vib_energies)"
@@ -86,11 +101,21 @@ function calc_ts_vibrations!(ts_cache::Dict{Symbol, Any}, rid, calc_builder; cal
     end
     jlve = pyconvert(Vector{ComplexF64}, vib_energies)
     @debug "vib_energies (reduced) = $jlve"
-    if any([z.im > ivetol for z in jlve])
-        throw(ErrorException("Imaginary frequency detected in goemetry of TS $rid."))
+    
+    if ivetol <= 0.0
+        n_ve = length(jlve)
+        jlve = [z.re for z in jlve if z.re > 0.0]
+        n_ive = n_ve - length(jlve)
+        if n_ive > 0 @debug "Removed $(n_ive) imaginary modes." end
     else
-        jlve = [z.re for z in jlve]
+        if any([z.im > ivetol for z in jlve])
+            throw(ErrorException("Imaginary frequency detected in geometry of TS $rid."))
+        else
+            jlve = [z.re for z in jlve if z.re > 0.0]
+        end
     end
+    @debug "vib_energies (processed) = $jlve"
+
     push!(ts_cache[:vib_energies], jlve)
     rm(vibdir, recursive=true)
     return

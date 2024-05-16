@@ -12,11 +12,12 @@ mutable struct ASENEBCalculator{kmType, tType} <: Kinetica.AbstractKineticCalcul
     n_images::Int
     parallel::Bool
     remove_unconverged::Bool
+vibration_displacement
     imaginary_freq_tol
     k_max::kmType
     t_unit::String
     t_mult::tType
-    cached_rids::Vector{Bool}
+    cached_rhashes::Vector{Vector{UInt8}}
     ts_cache::Dict{Symbol, Any}
     sd::SpeciesData
     rd::RxData
@@ -26,15 +27,16 @@ end
     ASENEBCalculator(calc_builder, calcdir_head[, 
         neb_k, ftol, climb, climb_ftol, maxiters,
         interpolation, n_images, parallel, 
-        remove_unconverged, imaginary_freq_tol,
+        remove_unconverged, vibration_displacement,
+        imaginary_freq_tol, ignore_imaginary_freqs,
         k_max, t_unit])
 
 Outer constructor method for ASE-driven NEB-based kinetic calculator.
 """
 function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, climb::Bool=true, climb_ftol=0.1,
                           maxiters=500, interpolation::String="idpp", n_images=11, parallel::Bool=false, 
-                          remove_unconverged::Bool=true, imaginary_freq_tol=1e-2, k_max::Union{Nothing, uType}=nothing, 
-                          t_unit::String="s") where {uType <: AbstractFloat}
+                          remove_unconverged::Bool=true, vibration_displacement=1e-2, imaginary_freq_tol=1e-2, 
+                          k_max::Union{Nothing, uType}=nothing, t_unit::String="s") where {uType <: AbstractFloat}
 
     # Ensure autodE can get to XTB
     @assert pyconvert(Bool, ade.methods.XTB().is_available)
@@ -43,12 +45,18 @@ function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, clim
     test_calc = calc_builder(mktempdir(), 1, 0)
     @assert typeof(test_calc) == Py
 
-    # Create main calculation directory
+    # Search for main calculation directory. If it exists, try to
+    # load in any existing calculator checkpoints. If not, set up
+    # a blank calculator.
     calcdir_head = abspath(calcdir_head)
-    if !isdir(calcdir_head) mkpath(calcdir_head) end
-    
-    t_mult = tconvert(t_unit, "s")
-    cached_rids = Vector{Bool}()
+    if isdir(calcdir_head) && isfile(joinpath(calcdir_head, "asecalc_chk.bson"))
+        calc_chk = load_asecalc(joinpath(calcdir_head, "asecalc_chk.bson"), nothing)
+        cached_rhashes = calc_chk.cached_rhashes
+        ts_cache = calc_chk.ts_cache
+        sd, rd = calc_chk.sd, calc_chk.rd
+    else
+        mkpath(calcdir_head)
+        cached_rhashes = Vector{Vector{UInt8}}()
     ts_cache = Dict{Symbol, Any}(
         :xyz => Vector{Dict{String, Any}}(),
         :reacsys_energies => Vector{Float64}(),
@@ -59,34 +67,45 @@ function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, clim
         :mult => Vector{Int}(),
         :charge => Vector{Int}()
     )
-    sd_blank, rd_blank = init_network()
+    sd, rd = init_network()
+end
     return ASENEBCalculator(calc_builder, calcdir_head, neb_k, ftol, climb, climb_ftol, maxiters, 
-                            interpolation, n_images, parallel, remove_unconverged, imaginary_freq_tol,
-                            k_max, t_unit, t_mult, cached_rids, ts_cache, sd_blank, rd_blank)
+                            interpolation, n_images, parallel, remove_unconverged, vibration_displacement,
+                            imaginary_freq_tol, k_max, t_unit, tconvert(t_unit, "s"), cached_rhashes,
+                            ts_cache, sd, rd)
 end
 
 """
 """
 function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENEBCalculator) where {iType}
+# Check the current calc.sd can be extended with this sd.
+    verify_sd(calc.sd, sd)
+    # Check the current calc.rd contains a subset of reactions in rd.
+    verify_rd(calc.rd, rd)
     # Check the cache is not out of sync.
-    if count(calc.cached_rids) != length(calc.ts_cache[:xyz])
-        throw(ErrorException("TS cache is out of sync! Ensure ts_cache entries match cached_rids."))
+    if count(calc.cached_rhashes) != length(calc.ts_cache[:xyz])
+        throw(ErrorException("TS cache is out of sync! Ensure ts_cache entries match cached_rhashes."))
     end
 
-    # If nothing has been cached, create an empty cache.
-    if length(calc.cached_rids) == 0
+    if length(calc.cached_rhashes) == 0
         @info "No reactions cached."
-        calc.cached_rids = [false for _ in 1:rd.nr]
-    # If the cache is smaller than nr, extend it.
-    elseif length(calc.cached_rids) < rd.nr
+        elseif length(calc.cached_rhashes) < rd.nr
         @info "New reactions added to CRN, expanding reaction cache."
-        calc.cached_rids = cat(calc.cached_rids, [false for _ in length(calc.cached_rids)+1:rd.nr]; dims=1)
-    else
+            else
         @info "No new reactions added to CRN."
     end
 
     # If SpeciesData does not have caches for these properties, create them.
     if !(:vib_energies in keys(sd.cache))
+# If there are compatible caches in calc.sd, copy them over.
+        if (:vib_energies in keys(calc.sd.cache))
+            @debug "Copying species caches from calc.sd"
+            sd.cache = calc.sd.cache
+            @debug "Copying cached species geometries from calc.sd"
+            for i in keys(sd.cache[:vib_energies])
+                sd.xyz[i] = calc.sd.xyz[i]
+            end
+        else
         @debug "Creating empty species caches"
         sd.cache[:vib_energies] = Dict{iType, Vector{Float64}}()
         sd.cache[:symmetry] = Dict{iType, Int}()
@@ -94,6 +113,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         sd.cache[:charge] = Dict{iType, Int}()
         sd.cache[:formal_charges] = Dict{iType, Vector{Int}}()
         sd.cache[:geometry] = Dict{iType, Int}()
+end
     end
 
     # Determine the species which are in reactions.
@@ -107,16 +127,38 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
     for i in active_species
         if !("energy_ASE" in keys(sd.xyz[i]["info"]))
             specoptdir = joinpath(specoptdir_head, "spec_$(lpad(i, 6, "0"))")
-            if !isdir(specoptdir) mkdir(specoptdir) end; cd(specoptdir)
+            opt_complete = false
+            if isdir(specoptdir) 
+                optfile = joinpath(specoptdir, "opt_final.bson")
+                if isfile(optfile)
+                    optgeom = load_optgeom(optfile)
+                    sd.xyz[i] = optgeom[:frame]
+                    sd.cache[:symmetry][i] = optgeom[:sym]
+                    sd.cache[:geometry][i] = optgeom[:geom]
+                    get_mult!(sd, i)
+                    get_charge!(sd, i) 
+                    get_formal_charges!(sd, i)
+                    @debug "Retrieved optimised geometry of species $i ($(sd.toStr[i])) from file."
+                    opt_complete = true
+                end
+            else
+                mkdir(specoptdir)
+            end
+
+            if !opt_complete
+                cd(specoptdir)
             get_mult!(sd, i)
             get_charge!(sd, i) 
             autode_conformer_search!(sd, i)
             get_formal_charges!(sd, i)
             conv = geomopt!(sd, i, calc.calc_builder; maxiters=calc.maxiters)
-            if !conv
+            if conv
+save_optgeom(sd.xyz[i], sd.cache[:symmetry][i], sd.cache[:geometry][i], "opt_final.bson")
+                else
                 @warn "Optimisation of species $i ($(sd.toStr[i])) failed to converge!"
             end
             cd(currdir)
+end
         end
     end
     get_species_stats!(sd, refresh=true)
@@ -126,7 +168,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
     if !isdir(nebdir_head) mkdir(nebdir_head) end
     for i in 1:rd.nr
         # Skip reaction if already cached.
-        if calc.cached_rids[i] continue end
+        if rd.rhash[i] in calc.cached_rhashes continue end
         @info "---------------------------------\nReaction $i\n---------------------------------"
         @info format_rxn(sd, rd, i)
         @debug rd.mapped_rxns[i]
@@ -135,9 +177,9 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         # Reactants/products don't need to be changed because they
         # are covered by the reverse reaction.
         reverse_rhash = get_reverse_rhash(sd, rd, i)
-        if reverse_rhash in rd.rhash
-            reverse_idx = findfirst(==(reverse_rhash), rd.rhash)
-            if calc.cached_rids[reverse_idx] && calc.ts_cache[:symmetry][reverse_idx] > -1 
+        if reverse_rhash in calc.cached_rhashes
+            reverse_idx = findfirst(==(reverse_rhash), calc.cached_rhashes)
+            if calc.ts_cache[:symmetry][reverse_idx] > -1 
                 push!(calc.ts_cache[:xyz], calc.ts_cache[:xyz][reverse_idx])
                 push!(calc.ts_cache[:vib_energies], calc.ts_cache[:vib_energies][reverse_idx])
                 push!(calc.ts_cache[:reacsys_energies], calc.ts_cache[:reacsys_energies][reverse_idx])
@@ -148,18 +190,70 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
                 push!(calc.ts_cache[:charge], calc.ts_cache[:charge][reverse_idx])
                 @info "Found reverse reaction in cache, skipping."
                 @info ""
-                calc.cached_rids[i] = true
+                push!(calc.cached_rhashes, rd.rhash[i])
                 continue
             end
         end
 
         # Create a unique directory that is independent of reaction numbering.
         nebdir = joinpath(nebdir_head, bytes2hex(rd.rhash[i]))
-        if !isdir(nebdir) mkdir(nebdir) end; cd(nebdir)
-        @info "Running calculations in $nebdir"
+        endpoints_complete = false
+        neb_complete = false
+        vib_complete = false
+        if isdir(nebdir) 
+            @info "Searching for completed calculations in $nebdir"
+            if isfile(joinpath(nebdir, "endpts.bson"))
+                reacsys_mapped, prodsys_mapped = load_endpoints(joinpath(nebdir, "endpts.bson"))
+                endpoints_complete = true
+                @info "Found completed endpoint calculations."
+            end
+            if isfile(joinpath(nebdir, "ts.bson"))
+                tsdata = load_tsdata(joinpath(nebdir, "ts.bson"))
+                if tsdata[:conv] || !(calc.remove_unconverged)
+                    push!(calc.ts_cache[:xyz], tsdata[:xyz])
+                    push!(calc.ts_cache[:mult], tsdata[:mult])
+                    push!(calc.ts_cache[:charge], tsdata[:charge])
+                    push!(calc.ts_cache[:symmetry], tsdata[:sym])
+                    push!(calc.ts_cache[:geometry], tsdata[:geom])
+                    rd.dH[i] = (prodsys_mapped["info"]["energy_ASE"] - reacsys_mapped["info"]["energy_ASE"]) * Constants.eV_to_kcal_per_mol
+                    push!(calc.ts_cache[:reacsys_energies], reacsys_mapped["info"]["energy_ASE"])
+                    push!(calc.ts_cache[:prodsys_energies], prodsys_mapped["info"]["energy_ASE"])
+                    neb_complete = true
+                    @info "Found completed NEB calculation."
+
+                    if isfile(joinpath(nebdir, "vib.bson"))
+                        vibdata = load_vibdata(joinpath(nebdir, "vib.bson"))
+                        for sid in vibdata[:sids]
+                            sd.cache[:vib_energies][sid] = vibdata[:by_sid][sid]
+                        end
+                        push!(calc.ts_cache[:vib_energies], vibdata[:ts])
+                        vib_complete = true
+                        @info "Found completed vibrational analyses."
+                    end
+
+                else
+                    push!(calc.ts_cache[:xyz], Dict{String, Any}())
+                    push!(calc.ts_cache[:vib_energies], [0.0+0.0im])
+                    push!(calc.ts_cache[:symmetry], -1)
+                    push!(calc.ts_cache[:geometry], -1)
+                    push!(calc.ts_cache[:reacsys_energies], 0.0)
+                    push!(calc.ts_cache[:prodsys_energies], 0.0)
+                    push!(calc.ts_cache[:mult], 0)
+                    push!(calc.ts_cache[:charge], 0)
+                    neb_complete = true
+                    vib_complete = true
+                    @info "Found completed NEB calculation (unconverged)."
+                end
+            end 
+        else
+            mkdir(nebdir)
+            @info "Starting calculations in $nebdir"
+end
+        cd(nebdir)
 
         # Create optimised non-covalent interacting reaction complexes for
         # reactants and products if required.
+if !endpoints_complete
         if sum(rd.stoic_reacs[i]) > 1
             reac_sids = []
             for (j, sid) in enumerate(rd.id_reacs[i])
@@ -225,37 +319,32 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         @info "Completed Kabsch fit of product system onto reactant system."
         permute_hydrogens!(prodsys_mapped, get_hydrogen_idxs(prod_map), reacsys_mapped)
 
-        # Interpolate and run NEB.
-        images, conv = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
-        # Save to caches.
-        # If unconverged and removal is requested, push blank
-        # entries to caches so splice! still works at the end.
-        if conv || !(calc.remove_unconverged)
-            ts = highest_energy_frame(images)
-            rxn_mult = get_rxn_mult(reacsys_mapped, prodsys_mapped)
+            # Save final endpoints.
+            save_endpoints(reacsys_mapped, prodsys_mapped, "endpts.bson")
+        end
 
+        # Interpolate and run NEB.
+if !neb_complete
+        images, conv = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
+                    ts = highest_energy_frame(images)
+            rxn_mult = get_rxn_mult(reacsys_mapped, prodsys_mapped)
+ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rxn_mult, chg=prodsys_mapped["info"]["chg"])
+
+            # Save TS data.
+            save_tsdata(ts, conv, rxn_mult, ts_sym, ts_geom, prodsys_mapped["info"]["chg"], "ts.bson")
+
+# Save to caches.
+            # If unconverged and removal is requested, push blank
+            # entries to caches so splice! still works at the end.
+            if conv || !(calc.remove_unconverged)
             push!(calc.ts_cache[:xyz], ts)
             push!(calc.ts_cache[:mult], rxn_mult)
             push!(calc.ts_cache[:charge], prodsys_mapped["info"]["chg"])
-            ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rxn_mult, chg=prodsys_mapped["info"]["chg"])
-            push!(calc.ts_cache[:symmetry], ts_sym)
+                        push!(calc.ts_cache[:symmetry], ts_sym)
             push!(calc.ts_cache[:geometry], ts_geom)
             rd.dH[i] = (prodsys_mapped["info"]["energy_ASE"] - reacsys_mapped["info"]["energy_ASE"]) * Constants.eV_to_kcal_per_mol
             push!(calc.ts_cache[:reacsys_energies], reacsys_mapped["info"]["energy_ASE"])
             push!(calc.ts_cache[:prodsys_energies], prodsys_mapped["info"]["energy_ASE"])
-
-            # Run individual vibrational analyses on reactants, products
-            # and TS.
-            ivetol = imaginary_ve_tol(calc.imaginary_freq_tol)
-            for rid in rd.id_reacs[i]
-                calc_species_vibrations!(sd, rid, calc.calc_builder; calcdir=nebdir, ivetol=ivetol)
-            end
-            for pid in rd.id_prods[i]
-                calc_species_vibrations!(sd, pid, calc.calc_builder; calcdir=nebdir, ivetol=ivetol)
-            end
-            calc_ts_vibrations!(calc.ts_cache, i, calc.calc_builder; calcdir=nebdir, ivetol=ivetol)
-            @info "Completed vibrational analysis."
-            @info ""
         else
             push!(calc.ts_cache[:xyz], Dict{String, Any}())
             push!(calc.ts_cache[:vib_energies], [0.0+0.0im])
@@ -265,9 +354,35 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             push!(calc.ts_cache[:prodsys_energies], 0.0)
             push!(calc.ts_cache[:mult], 0)
             push!(calc.ts_cache[:charge], 0)
+        vib_complete = true
+            end
         end
 
-        calc.cached_rids[i] = true
+        # Run individual vibrational analyses on reactants, products
+        # and TS.
+        if !vib_complete
+            ivetol = imaginary_ve_tol(calc.imaginary_freq_tol)
+            vib_sids = []
+            for rid in rd.id_reacs[i]
+                calc_species_vibrations!(sd, rid, calc.calc_builder; calcdir=nebdir, 
+                                         delta=calc.vibration_displacement, ivetol=ivetol)
+                push!(vib_sids, rid)
+            end
+            for pid in rd.id_prods[i]
+                calc_species_vibrations!(sd, pid, calc.calc_builder; calcdir=nebdir, 
+                                         delta=calc.vibration_displacement, ivetol=ivetol)
+                push!(vib_sids, pid)
+            end
+            calc_ts_vibrations!(calc.ts_cache, i, calc.calc_builder; calcdir=nebdir, 
+                                delta=calc.vibration_displacement, ivetol=ivetol)
+
+            # Save vibrational energies
+            save_vibdata(sd, vib_sids, calc.ts_cache, i, "vib.bson")
+            @info "Completed vibrational analysis."
+            @info ""
+        end
+
+        push!(calc.cached_rhashes, rd.rhash[i])
         cd(currdir)
     end
 
@@ -276,8 +391,8 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
     unconverged_rids = findall(==(-1), calc.ts_cache[:symmetry])
     for i in unconverged_rids
         reverse_rhash = get_reverse_rhash(sd, rd, i)
-        if reverse_rhash in rd.rhash
-            reverse_idx = findfirst(==(reverse_rhash), rd.rhash)
+        if reverse_rhash in calc.cached_rhashes
+            reverse_idx = findfirst(==(reverse_rhash), calc.cached_rhashes)
             if calc.ts_cache[:symmetry][reverse_idx] > -1 
                 calc.ts_cache[:xyz][i] = calc.ts_cache[:xyz][reverse_idx]
                 calc.ts_cache[:vib_energies][i] = calc.ts_cache[:vib_energies][reverse_idx]
@@ -298,6 +413,8 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         rem_idxs = findall(==(-1), calc.ts_cache[:symmetry])
         # Remove unconverged reactions from CRN.
         splice!(rd, calc, rem_idxs)
+@info "Removed $(length(rem_idxs)) unconverged reactions from CRN."
+        @debug "rem_idxs = $(rem_idxs)"
     end
 
     # Share final CRN with calculator. 
@@ -310,10 +427,10 @@ end
 """
 """
 function Base.splice!(calc::ASENEBCalculator, rids::Vector{Int})
-    for key in keys(calc.cache)
-        splice!(calc.cache[key], rids)
+    for key in keys(calc.ts_cache)
+        splice!(calc.ts_cache[key], rids)
     end
-    splice!(calc.cached_rids, rids)
+    splice!(calc.cached_rhashes, rids)
 end
 
 
@@ -322,7 +439,7 @@ end
 function get_entropy(sd::SpeciesData, sid, T, P)
     return get_entropy(
         sd.cache[:weights][sid],
-        sd.xyz[sid]["info"]["inertias"],
+        sd.xyz[sid]["arrays"]["inertias"],
         sd.cache[:geometry][sid],
         sd.cache[:symmetry][sid],
         sd.cache[:mult][sid],
@@ -334,7 +451,7 @@ end
 function get_entropy(ts_cache::Dict{Symbol, Any}, rid, mass, T, P)
     return get_entropy(
         mass,
-        ts_cache[:xyz][rid]["info"]["inertias"],
+        ts_cache[:xyz][rid]["arrays"]["inertias"],
         ts_cache[:geometry][rid],
         ts_cache[:symmetry][rid],
         ts_cache[:mult][rid],

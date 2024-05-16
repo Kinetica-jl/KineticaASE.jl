@@ -13,6 +13,7 @@ using PythonCall
 using ExtXYZ
 using Glob
 using StableHashTraits
+using BSON
 
 const version = VersionNumber(0, 1, 0)
 
@@ -54,5 +55,7 @@ include("autode.jl")
 
 include("builders.jl")
 export EMTBuilder, NWChemDFTBuilder
+
+include("io.jl")
 
 end
