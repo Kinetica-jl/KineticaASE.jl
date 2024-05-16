@@ -12,7 +12,7 @@ mutable struct ASENEBCalculator{kmType, tType} <: Kinetica.AbstractKineticCalcul
     n_images::Int
     parallel::Bool
     remove_unconverged::Bool
-vibration_displacement
+    vibration_displacement
     imaginary_freq_tol
     k_max::kmType
     t_unit::String
@@ -28,7 +28,7 @@ end
         neb_k, ftol, climb, climb_ftol, maxiters,
         interpolation, n_images, parallel, 
         remove_unconverged, vibration_displacement,
-        imaginary_freq_tol, ignore_imaginary_freqs,
+        imaginary_freq_tol, ignore_imaginary_freqs, 
         k_max, t_unit])
 
 Outer constructor method for ASE-driven NEB-based kinetic calculator.
@@ -57,18 +57,18 @@ function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, clim
     else
         mkpath(calcdir_head)
         cached_rhashes = Vector{Vector{UInt8}}()
-    ts_cache = Dict{Symbol, Any}(
-        :xyz => Vector{Dict{String, Any}}(),
-        :reacsys_energies => Vector{Float64}(),
-        :prodsys_energies => Vector{Float64}(),
-        :vib_energies => Vector{Vector{Float64}}(),
-        :symmetry => Vector{Int}(),
-        :geometry => Vector{Int}(),
-        :mult => Vector{Int}(),
-        :charge => Vector{Int}()
-    )
-    sd, rd = init_network()
-end
+        ts_cache = Dict{Symbol, Any}(
+            :xyz => Vector{Dict{String, Any}}(),
+            :reacsys_energies => Vector{Float64}(),
+            :prodsys_energies => Vector{Float64}(),
+            :vib_energies => Vector{Vector{Float64}}(),
+            :symmetry => Vector{Int}(),
+            :geometry => Vector{Int}(),
+            :mult => Vector{Int}(),
+            :charge => Vector{Int}()
+        )
+        sd, rd = init_network()
+    end
     return ASENEBCalculator(calc_builder, calcdir_head, neb_k, ftol, climb, climb_ftol, maxiters, 
                             interpolation, n_images, parallel, remove_unconverged, vibration_displacement,
                             imaginary_freq_tol, k_max, t_unit, tconvert(t_unit, "s"), cached_rhashes,
@@ -78,7 +78,7 @@ end
 """
 """
 function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENEBCalculator) where {iType}
-# Check the current calc.sd can be extended with this sd.
+    # Check the current calc.sd can be extended with this sd.
     verify_sd(calc.sd, sd)
     # Check the current calc.rd contains a subset of reactions in rd.
     verify_rd(calc.rd, rd)
@@ -89,15 +89,15 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
 
     if length(calc.cached_rhashes) == 0
         @info "No reactions cached."
-        elseif length(calc.cached_rhashes) < rd.nr
+    elseif length(calc.cached_rhashes) < rd.nr
         @info "New reactions added to CRN, expanding reaction cache."
-            else
+    else
         @info "No new reactions added to CRN."
     end
 
     # If SpeciesData does not have caches for these properties, create them.
     if !(:vib_energies in keys(sd.cache))
-# If there are compatible caches in calc.sd, copy them over.
+        # If there are compatible caches in calc.sd, copy them over.
         if (:vib_energies in keys(calc.sd.cache))
             @debug "Copying species caches from calc.sd"
             sd.cache = calc.sd.cache
@@ -106,14 +106,14 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
                 sd.xyz[i] = calc.sd.xyz[i]
             end
         else
-        @debug "Creating empty species caches"
-        sd.cache[:vib_energies] = Dict{iType, Vector{Float64}}()
-        sd.cache[:symmetry] = Dict{iType, Int}()
-        sd.cache[:mult] = Dict{iType, Int}()
-        sd.cache[:charge] = Dict{iType, Int}()
-        sd.cache[:formal_charges] = Dict{iType, Vector{Int}}()
-        sd.cache[:geometry] = Dict{iType, Int}()
-end
+            @debug "Creating empty species caches"
+            sd.cache[:vib_energies] = Dict{iType, Vector{Float64}}()
+            sd.cache[:symmetry] = Dict{iType, Int}()
+            sd.cache[:mult] = Dict{iType, Int}()
+            sd.cache[:charge] = Dict{iType, Int}()
+            sd.cache[:formal_charges] = Dict{iType, Vector{Int}}()
+            sd.cache[:geometry] = Dict{iType, Int}()
+        end
     end
 
     # Determine the species which are in reactions.
@@ -147,18 +147,18 @@ end
 
             if !opt_complete
                 cd(specoptdir)
-            get_mult!(sd, i)
-            get_charge!(sd, i) 
-            autode_conformer_search!(sd, i)
-            get_formal_charges!(sd, i)
-            conv = geomopt!(sd, i, calc.calc_builder; maxiters=calc.maxiters)
-            if conv
-save_optgeom(sd.xyz[i], sd.cache[:symmetry][i], sd.cache[:geometry][i], "opt_final.bson")
+                get_mult!(sd, i)
+                get_charge!(sd, i) 
+                autode_conformer_search!(sd, i)
+                get_formal_charges!(sd, i)
+                conv = geomopt!(sd, i, calc.calc_builder; maxiters=calc.maxiters)
+                if conv
+                    save_optgeom(sd.xyz[i], sd.cache[:symmetry][i], sd.cache[:geometry][i], "opt_final.bson")
                 else
-                @warn "Optimisation of species $i ($(sd.toStr[i])) failed to converge!"
+                    @warn "Optimisation of species $i ($(sd.toStr[i])) failed to converge!"
+                end
+                cd(currdir)
             end
-            cd(currdir)
-end
         end
     end
     get_species_stats!(sd, refresh=true)
@@ -248,113 +248,113 @@ end
         else
             mkdir(nebdir)
             @info "Starting calculations in $nebdir"
-end
+        end
         cd(nebdir)
 
         # Create optimised non-covalent interacting reaction complexes for
         # reactants and products if required.
-if !endpoints_complete
-        if sum(rd.stoic_reacs[i]) > 1
-            reac_sids = []
-            for (j, sid) in enumerate(rd.id_reacs[i])
-                for _ in 1:rd.stoic_reacs[i][j]
-                    push!(reac_sids, sid)
+        if !endpoints_complete
+            if sum(rd.stoic_reacs[i]) > 1
+                reac_sids = []
+                for (j, sid) in enumerate(rd.id_reacs[i])
+                    for _ in 1:rd.stoic_reacs[i][j]
+                        push!(reac_sids, sid)
+                    end
                 end
+                reacsys = autode_NCI_conformer_search(sd, reac_sids; name="reacsys")
+                reacsys["info"]["n_species"] = length(reac_sids)
+                reacsys_smi = join([sd.toStr[sid] for sid in reac_sids], ".")
+                formal_charges = get_formal_charges(atom_map_smiles(reacsys, reacsys_smi))
+                safe_geomopt!(reacsys, calc.calc_builder; calcdir=nebdir, mult=reacsys["info"]["mult"], 
+                            chg=reacsys["info"]["chg"], formal_charges=formal_charges, maxiters=calc.maxiters)
+            else
+                sid = rd.id_reacs[i][1]
+                reacsys = sd.xyz[sid]
+                reacsys["info"]["mult"] = sd.cache[:mult][sid]
+                reacsys["info"]["chg"] = sd.cache[:charge][sid]
+                reacsys["info"]["n_species"] = 1
             end
-            reacsys = autode_NCI_conformer_search(sd, reac_sids; name="reacsys")
-            reacsys["info"]["n_species"] = length(reac_sids)
-            reacsys_smi = join([sd.toStr[sid] for sid in reac_sids], ".")
-            formal_charges = get_formal_charges(atom_map_smiles(reacsys, reacsys_smi))
-            safe_geomopt!(reacsys, calc.calc_builder; calcdir=nebdir, mult=reacsys["info"]["mult"], 
-                          chg=reacsys["info"]["chg"], formal_charges=formal_charges, maxiters=calc.maxiters)
-        else
-            sid = rd.id_reacs[i][1]
-            reacsys = sd.xyz[sid]
-            reacsys["info"]["mult"] = sd.cache[:mult][sid]
-            reacsys["info"]["chg"] = sd.cache[:charge][sid]
-            reacsys["info"]["n_species"] = 1
-        end
-        @info "Assembled reactant system."
-        if sum(rd.stoic_prods[i]) > 1
-            prod_sids = []
-            for (j, sid) in enumerate(rd.id_prods[i])
-                for _ in 1:rd.stoic_prods[i][j]
-                    push!(prod_sids, sid)
+            @info "Assembled reactant system."
+            if sum(rd.stoic_prods[i]) > 1
+                prod_sids = []
+                for (j, sid) in enumerate(rd.id_prods[i])
+                    for _ in 1:rd.stoic_prods[i][j]
+                        push!(prod_sids, sid)
+                    end
                 end
+                prodsys = autode_NCI_conformer_search(sd, prod_sids; name="prodsys")
+                if prodsys["info"]["chg"] != reacsys["info"]["chg"]
+                    throw(ErrorException("Charge not conserved in reaction $i: chg(R) = $(reacsys["info"]["chg"]), chg(P) = $(prodsys["info"]["chg"])"))
+                end
+                prodsys["info"]["n_species"] = length(prod_sids)
+                prodsys_smi = join([sd.toStr[sid] for sid in prod_sids], ".")
+                formal_charges = get_formal_charges(atom_map_smiles(prodsys, prodsys_smi))
+                safe_geomopt!(prodsys, calc.calc_builder; calcdir=nebdir, mult=prodsys["info"]["mult"], 
+                            chg=prodsys["info"]["chg"], formal_charges=formal_charges, maxiters=calc.maxiters)
+            else
+                sid = rd.id_prods[i][1]
+                if sd.cache[:charge][sid] != reacsys["info"]["chg"]
+                    throw(ErrorException("Charge not conserved in reaction $i: chg(R) = $(reacsys["info"]["chg"]), chg(P) = $(sd.cache[:charge][sid])"))
+                end
+                prodsys = sd.xyz[sid]
+                prodsys["info"]["mult"] = sd.cache[:mult][sid]
+                prodsys["info"]["chg"] = sd.cache[:charge][sid]
+                prodsys["info"]["n_species"] = 1
             end
-            prodsys = autode_NCI_conformer_search(sd, prod_sids; name="prodsys")
-            if prodsys["info"]["chg"] != reacsys["info"]["chg"]
-                throw(ErrorException("Charge not conserved in reaction $i: chg(R) = $(reacsys["info"]["chg"]), chg(P) = $(prodsys["info"]["chg"])"))
-            end
-            prodsys["info"]["n_species"] = length(prod_sids)
-            prodsys_smi = join([sd.toStr[sid] for sid in prod_sids], ".")
-            formal_charges = get_formal_charges(atom_map_smiles(prodsys, prodsys_smi))
-            safe_geomopt!(prodsys, calc.calc_builder; calcdir=nebdir, mult=prodsys["info"]["mult"], 
-                          chg=prodsys["info"]["chg"], formal_charges=formal_charges, maxiters=calc.maxiters)
-        else
-            sid = rd.id_prods[i][1]
-            if sd.cache[:charge][sid] != reacsys["info"]["chg"]
-                throw(ErrorException("Charge not conserved in reaction $i: chg(R) = $(reacsys["info"]["chg"]), chg(P) = $(sd.cache[:charge][sid])"))
-            end
-            prodsys = sd.xyz[sid]
-            prodsys["info"]["mult"] = sd.cache[:mult][sid]
-            prodsys["info"]["chg"] = sd.cache[:charge][sid]
-            prodsys["info"]["n_species"] = 1
-        end
-        @info "Assembled product system."
+            @info "Assembled product system."
 
-        # Atom map endpoints.
-        # Also obtain new formal charge arrays for remapped
-        # endpoints. 
-        reac_map, prod_map = split(rd.mapped_rxns[i], ">>")
-        reac_map, prod_map = string(reac_map), string(prod_map)
-        reacsys_mapped = atom_map_frame(reac_map, reacsys)
-        reacsys_mapped["info"]["formal_charges"] = get_formal_charges(reac_map)
-        prodsys_mapped = atom_map_frame(prod_map, prodsys)
-        prodsys_mapped["info"]["formal_charges"] = get_formal_charges(prod_map)
-        @info "Remapped atom indices."
+            # Atom map endpoints.
+            # Also obtain new formal charge arrays for remapped
+            # endpoints. 
+            reac_map, prod_map = split(rd.mapped_rxns[i], ">>")
+            reac_map, prod_map = string(reac_map), string(prod_map)
+            reacsys_mapped = atom_map_frame(reac_map, reacsys)
+            reacsys_mapped["info"]["formal_charges"] = get_formal_charges(reac_map)
+            prodsys_mapped = atom_map_frame(prod_map, prodsys)
+            prodsys_mapped["info"]["formal_charges"] = get_formal_charges(prod_map)
+            @info "Remapped atom indices."
 
-        # Kabsch fit product system onto reactant system.
-        kabsch_fit!(prodsys_mapped, reacsys_mapped)
-        @info "Completed Kabsch fit of product system onto reactant system."
-        permute_hydrogens!(prodsys_mapped, get_hydrogen_idxs(prod_map), reacsys_mapped)
+            # Kabsch fit product system onto reactant system.
+            kabsch_fit!(prodsys_mapped, reacsys_mapped)
+            @info "Completed Kabsch fit of product system onto reactant system."
+            permute_hydrogens!(prodsys_mapped, get_hydrogen_idxs(prod_map), reacsys_mapped)
 
             # Save final endpoints.
             save_endpoints(reacsys_mapped, prodsys_mapped, "endpts.bson")
         end
 
         # Interpolate and run NEB.
-if !neb_complete
-        images, conv = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
-                    ts = highest_energy_frame(images)
+        if !neb_complete
+            images, conv = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
+            ts = highest_energy_frame(images)
             rxn_mult = get_rxn_mult(reacsys_mapped, prodsys_mapped)
-ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rxn_mult, chg=prodsys_mapped["info"]["chg"])
+            ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rxn_mult, chg=prodsys_mapped["info"]["chg"])
 
             # Save TS data.
             save_tsdata(ts, conv, rxn_mult, ts_sym, ts_geom, prodsys_mapped["info"]["chg"], "ts.bson")
 
-# Save to caches.
+            # Save to caches.
             # If unconverged and removal is requested, push blank
             # entries to caches so splice! still works at the end.
             if conv || !(calc.remove_unconverged)
-            push!(calc.ts_cache[:xyz], ts)
-            push!(calc.ts_cache[:mult], rxn_mult)
-            push!(calc.ts_cache[:charge], prodsys_mapped["info"]["chg"])
-                        push!(calc.ts_cache[:symmetry], ts_sym)
-            push!(calc.ts_cache[:geometry], ts_geom)
-            rd.dH[i] = (prodsys_mapped["info"]["energy_ASE"] - reacsys_mapped["info"]["energy_ASE"]) * Constants.eV_to_kcal_per_mol
-            push!(calc.ts_cache[:reacsys_energies], reacsys_mapped["info"]["energy_ASE"])
-            push!(calc.ts_cache[:prodsys_energies], prodsys_mapped["info"]["energy_ASE"])
-        else
-            push!(calc.ts_cache[:xyz], Dict{String, Any}())
-            push!(calc.ts_cache[:vib_energies], [0.0+0.0im])
-            push!(calc.ts_cache[:symmetry], -1)
-            push!(calc.ts_cache[:geometry], -1)
-            push!(calc.ts_cache[:reacsys_energies], 0.0)
-            push!(calc.ts_cache[:prodsys_energies], 0.0)
-            push!(calc.ts_cache[:mult], 0)
-            push!(calc.ts_cache[:charge], 0)
-        vib_complete = true
+                push!(calc.ts_cache[:xyz], ts)
+                push!(calc.ts_cache[:mult], rxn_mult)
+                push!(calc.ts_cache[:charge], prodsys_mapped["info"]["chg"])
+                push!(calc.ts_cache[:symmetry], ts_sym)
+                push!(calc.ts_cache[:geometry], ts_geom)
+                rd.dH[i] = (prodsys_mapped["info"]["energy_ASE"] - reacsys_mapped["info"]["energy_ASE"]) * Constants.eV_to_kcal_per_mol
+                push!(calc.ts_cache[:reacsys_energies], reacsys_mapped["info"]["energy_ASE"])
+                push!(calc.ts_cache[:prodsys_energies], prodsys_mapped["info"]["energy_ASE"])
+            else
+                push!(calc.ts_cache[:xyz], Dict{String, Any}())
+                push!(calc.ts_cache[:vib_energies], [0.0+0.0im])
+                push!(calc.ts_cache[:symmetry], -1)
+                push!(calc.ts_cache[:geometry], -1)
+                push!(calc.ts_cache[:reacsys_energies], 0.0)
+                push!(calc.ts_cache[:prodsys_energies], 0.0)
+                push!(calc.ts_cache[:mult], 0)
+                push!(calc.ts_cache[:charge], 0)
+                vib_complete = true
             end
         end
 
@@ -413,7 +413,7 @@ ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rxn_mult, chg=prodsys_mapped["i
         rem_idxs = findall(==(-1), calc.ts_cache[:symmetry])
         # Remove unconverged reactions from CRN.
         splice!(rd, calc, rem_idxs)
-@info "Removed $(length(rem_idxs)) unconverged reactions from CRN."
+        @info "Removed $(length(rem_idxs)) unconverged reactions from CRN."
         @debug "rem_idxs = $(rem_idxs)"
     end
 
@@ -575,6 +575,9 @@ function (calc::ASENEBCalculator{Nothing, tType})(; T::Number, P::Number) where 
         dH[rid] = H_ts - H_reacs
     end
 
+    # Convert from eV/K and eV to J/mol/K and J/mol
+    dS ./= (ASEConstants.J/ASEConstants.mol)
+    dH ./= (ASEConstants.J/ASEConstants.mol)
     k = Constants.k_b*T/Constants.h .* exp.(dS/Constants.R) .* exp.(-dH/(Constants.R*T))
     return k
 end

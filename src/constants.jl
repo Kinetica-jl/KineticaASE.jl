@@ -8,5 +8,7 @@ const ref_P = 1e5 # Reference pressure in Pa
 const hbar = 1.0545718001391127e-34 # Reduced Planck constant in Js
 const m = 1e10 # Metres in 1 Ang
 const e = 1.6021766208e-19 # Electron charge in C
+const J = 6.241509125883258e18 # eV in 1 J
+const mol = 6.022140857e23 # Avogadro's number
 
 end
