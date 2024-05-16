@@ -11,7 +11,7 @@ this can be populated by passing a `Dict{String, Any}` to the
 """
 function autode_to_frame(ademol::Py; info_dict=nothing)
     na = pylen(ademol.atoms)
-    symbols = [pyconvert(String, ademol.atoms[i].atomic_symbol) for i in 0:na-1]
+    symbols = String[pyconvert(String, ademol.atoms[i].atomic_symbol) for i in 0:na-1]
     coords = reduce(hcat, [
         [
             pyconvert(Float64, ademol.atoms[i].coord.x),

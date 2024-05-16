@@ -118,11 +118,11 @@ function geomopt!(frame::Dict{String, Any}, calc_builder;
         @debug "Geometry optimisation complete."
         frame["arrays"]["pos"] = pyconvert(Matrix, atoms.get_positions().T)
         frame["info"]["energy_ASE"] = pyconvert(Float64, atoms.get_potential_energy())
-        frame["info"]["inertias"] = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
+        frame["arrays"]["inertias"] = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
     else
         @debug "Geometry optimisation failed."
         frame["info"]["energy_ASE"] = init_energy
-        frame["info"]["inertias"] = init_inertias
+        frame["arrays"]["inertias"] = init_inertias
     end
     return conv
 end
@@ -167,17 +167,17 @@ function safe_geomopt!(frame::Dict{String, Any}, calc_builder;
         if !pyconvert(Bool, ade.mol_graphs.is_isomorphic(ademol_orig.graph, ademol_opt.graph))
             @warn "Optimised geometry invalidates molecular graph, reverting to unoptimised geometry."
             frame["info"]["energy_ASE"] = init_energy
-            frame["info"]["inertias"] = init_inertias
+            frame["arrays"]["inertias"] = init_inertias
             conv = false
         else
             frame["arrays"]["pos"] = pyconvert(Matrix, atoms.get_positions().T)
             frame["info"]["energy_ASE"] = pyconvert(Float64, atoms.get_potential_energy())
-            frame["info"]["inertias"] = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
+            frame["arrays"]["inertias"] = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
         end
     else
         @warn "Geometry optimisation failed."
         frame["info"]["energy_ASE"] = init_energy
-        frame["info"]["inertias"] = init_inertias
+        frame["arrays"]["inertias"] = init_inertias
     end
     return conv
 end

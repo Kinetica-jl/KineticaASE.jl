@@ -47,7 +47,7 @@ function atoms_to_frame(atoms::Py, ase_energy=nothing, inertias=nothing)
         "info" => pyconvert(Dict{String, Any}, atoms.info)
     )
     if !isnothing(ase_energy) frame["info"]["energy_ASE"] = ase_energy end
-    if !isnothing(inertias) frame["info"]["inertias"] = inertias end
+    if !isnothing(inertias) frame["arrays"]["inertias"] = inertias end
     return frame
 end
 
