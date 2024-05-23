@@ -16,6 +16,7 @@ end
 
 mutable struct NWChemDFTBuilder
     calc_class::Py
+    command::String
     xc::String
     basis::Union{String, Dict{String, String}}
     adft::Bool
@@ -23,13 +24,14 @@ mutable struct NWChemDFTBuilder
 end
 
 function NWChemDFTBuilder(; 
-        xc::String="pbe", 
+        command::String="nwchem PREFIX.nwi > PREFIX.nwo",
+        xc::String="becke97", 
         basis::Union{String, Dict{String, String}}="3-21G",
         adft::Bool=true, 
-        memory::String="1024mb"
+        memory::String="1024 mb"
     )
     nwchem = pyimport("ase.calculators.nwchem")
-    return NWChemDFTBuilder(nwchem.NWChem, xc, basis, adft, memory)
+    return NWChemDFTBuilder(nwchem.NWChem, command, xc, basis, adft, memory)
 end
 
 function (builder::NWChemDFTBuilder)(dir::String, mult::Int, chg::Int, kwargs...)
@@ -39,9 +41,11 @@ function (builder::NWChemDFTBuilder)(dir::String, mult::Int, chg::Int, kwargs...
     )
     if builder.adft dft_dict["adft"] = nothing end
 
-    return builder.calc_class(
+    calc = builder.calc_class(
         memory=builder.memory,
-        dft=dft_dict,
+        dft=pydict(dft_dict),
         basis=builder.basis
     )
+    calc.command = builder.command
+    return calc
 end
