@@ -19,6 +19,8 @@ mutable struct NWChemDFTBuilder
     command::String
     xc::String
     basis::Union{String, Dict{String, String}}
+    maxiter::Int
+    convergence::String
     adft::Bool
     memory::String
 end
@@ -27,19 +29,23 @@ function NWChemDFTBuilder(;
         command::String="nwchem PREFIX.nwi > PREFIX.nwo",
         xc::String="becke97", 
         basis::Union{String, Dict{String, String}}="3-21G",
+        maxiter::Int=50,
+        convergence::String="",
         adft::Bool=true, 
         memory::String="1024 mb"
     )
     nwchem = pyimport("ase.calculators.nwchem")
-    return NWChemDFTBuilder(nwchem.NWChem, command, xc, basis, adft, memory)
+    return NWChemDFTBuilder(nwchem.NWChem, command, xc, basis, maxiter, convergence, adft, memory)
 end
 
 function (builder::NWChemDFTBuilder)(dir::String, mult::Int, chg::Int, kwargs...)
     dft_dict = Dict(
         "xc" => builder.xc,
-        "mult" => mult
+        "mult" => mult,
+        "maxiter" => builder.maxiter
     )
     if builder.adft dft_dict["adft"] = nothing end
+    if !(builder.convergence == "") dft_dict["convergence"] = builder.convergence end
 
     calc = builder.calc_class(
         memory=builder.memory,
