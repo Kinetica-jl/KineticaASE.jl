@@ -80,9 +80,9 @@ function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, clim
         sd, rd = init_network()
     end
     return ASENEBCalculator(calc_builder, calcdir_head, neb_k, ftol, climb, climb_ftol, maxiters, 
-                            interpolation, n_images, parallel, remove_unconverged, vibration_displacement,
-                            imaginary_freq_tol, k_max, t_unit, tconvert(t_unit, "s"), cached_rhashes,
-                            ts_cache, sd, rd)
+                            interpolation, n_images, parallel, neb_optimiser, remove_unconverged, 
+                            vibration_displacement, imaginary_freq_tol, k_max, t_unit, tconvert(t_unit, "s"), 
+                            cached_rhashes, ts_cache, sd, rd)
 end
 
 """
