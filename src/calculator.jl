@@ -11,6 +11,7 @@ mutable struct ASENEBCalculator{kmType, tType} <: Kinetica.AbstractKineticCalcul
     interpolation::String
     n_images::Int
     parallel::Bool
+    neb_optimiser::String
     remove_unconverged::Bool
     vibration_displacement
     imaginary_freq_tol
@@ -26,7 +27,7 @@ end
 """
     ASENEBCalculator(calc_builder, calcdir_head[, 
         neb_k, ftol, climb, climb_ftol, maxiters,
-        interpolation, n_images, parallel, 
+        interpolation, n_images, parallel, neb_optimiser,
         remove_unconverged, vibration_displacement,
         imaginary_freq_tol, ignore_imaginary_freqs, 
         k_max, t_unit])
@@ -35,8 +36,17 @@ Outer constructor method for ASE-driven NEB-based kinetic calculator.
 """
 function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, climb::Bool=true, climb_ftol=0.1,
                           maxiters=500, interpolation::String="idpp", n_images=11, parallel::Bool=false, 
-                          remove_unconverged::Bool=true, vibration_displacement=1e-2, imaginary_freq_tol=1e-2, 
-                          k_max::Union{Nothing, uType}=nothing, t_unit::String="s") where {uType <: AbstractFloat}
+                          neb_optimiser::String="ode", remove_unconverged::Bool=true, vibration_displacement=1e-2,
+                          imaginary_freq_tol=1e-2, k_max::Union{Nothing, uType}=nothing, t_unit::String="s"
+                          ) where {uType <: AbstractFloat}
+
+    # Sanitise arguments.
+    if !(interpolation in ["linear", "idpp"])
+        throw(ArgumentError("`interpolation` must be one of must be one of [\"linear\", \"idpp\"]"))
+    end
+    if !(neb_optimiser in ["ode", "fire", "lbfgs", "mdmin"])
+        throw(ArgumentError("`neb_optimiser` must be one of [\"ode\", \"fire\", \"lbfgs\", \"mdmin\"]"))
+    end
 
     # Ensure autodE can get to XTB
     @assert pyconvert(Bool, ade.methods.XTB().is_available)

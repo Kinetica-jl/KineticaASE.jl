@@ -74,12 +74,22 @@ function neb(reacsys, prodsys, calc::ASENEBCalculator; calcdir="./", kwargs...)
     if calc.interpolation in ["linear", "idpp"]
         neb.interpolate(method=calc.interpolation)
     else
-        throw(ErrorException("Unknown interpolation method. must be one of [\"linear\", \"idpp\"]"))
+        throw(ErrorException("Unknown interpolation method, must be one of [\"linear\", \"idpp\"]"))
     end
     aseio.write(joinpath(calcdir, "interp.traj"), images)
 
-    # opt = aseopt.FIRE(neb)
-    opt = aseneb.NEBOptimizer(neb, verbose=1)
+    if calc.neb_optimiser == "fire"
+        opt = aseopt.FIRE(neb)
+    elseif calc.neb_optimiser == "lbfgs"    
+        opt = aseopt.LBFGS(neb)
+    elseif calc.neb_optimiser == "mdmin"
+        opt = aseopt.MDMin(neb)
+    elseif calc.neb_optimiser == "ode"
+        opt = aseneb.NEBOptimizer(neb, verbose=1)
+    else
+        throw(ArgumentError("Unknown optimiser, must be one of [\"ode\", \"fire\", \"lbfgs\", \"mdmin\"]"))
+    end
+    
     if calc.climb
         @debug "Running NEB to tolerance of $(calc.climb_ftol) before enabling CI"
         conv = opt.run(fmax=calc.climb_ftol, steps=calc.maxiters)
