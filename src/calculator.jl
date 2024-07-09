@@ -233,8 +233,12 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
 
                     if isfile(joinpath(nebdir, "vib.bson"))
                         vibdata = load_vibdata(joinpath(nebdir, "vib.bson"))
-                        for sid in vibdata[:sids]
-                            sd.cache[:vib_energies][sid] = vibdata[:by_sid][sid]
+                        for smi in vibdata[:smis]
+                            if !(smi in keys(sd.toInt))
+                                throw(ErrorException("Error loading vibdata: SMILES not in SpeciesData ($smi)."))
+                            end
+                            sid = sd.toInt[smi]
+                            sd.cache[:vib_energies][sid] = vibdata[:by_smi][smi]
                         end
                         push!(calc.ts_cache[:vib_energies], vibdata[:ts])
                         vib_complete = true

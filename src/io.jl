@@ -261,8 +261,8 @@ end
 """
 function save_vibdata(sd::SpeciesData, sids, ts_cache::Dict{Symbol, Any}, rid, saveto::String)
     savedict = Dict(
-        :sids => sids,
-        :by_sid => Dict(sid => sd.cache[:vib_energies][sid] for sid in sids),
+        :smis => [sd.toStr[sid] for sid in sids],
+        :by_smi => Dict(sd.toStr[sid] => sd.cache[:vib_energies][sid] for sid in sids),
         :ts => ts_cache[:vib_energies][rid]
     )
     bson(saveto, savedict)
