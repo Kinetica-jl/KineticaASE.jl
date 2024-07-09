@@ -12,12 +12,14 @@ function save_asecalc(calc::ASENEBCalculator, saveto::String)
         :interpolation => calc.interpolation,
         :n_images => calc.n_images,
         :parallel => calc.parallel,
+        :neb_optimiser => calc.neb_optimiser,
         :remove_unconverged => calc.remove_unconverged,
+        :vibration_displacement => calc.vibration_displacement,
         :imaginary_freq_tol => calc.imaginary_freq_tol,
         :k_max => calc.k_max,
         :t_unit => calc.t_unit,
         :t_mult => calc.t_mult,
-        :cached_rids => calc.cached_rids,
+        :cached_rhashes => calc.cached_rhashes,
 
         :ts_cache => calc.ts_cache,
         :sd => Dict(
@@ -77,6 +79,9 @@ function load_asecalc(calcfile::String, calc_builder)
         Vector{UInt8}[hash for hash in savedict[:rd][:rhash]]
     )
 
+    # Work around Vector{Vector} type instability.
+    rhashes = Vector{UInt8}[rh for rh in savedict[:cached_rhashes]]
+
     calc = ASENEBCalculator(
         calc_builder, 
         savedict[:calcdir_head],
@@ -88,12 +93,14 @@ function load_asecalc(calcfile::String, calc_builder)
         savedict[:interpolation],
         savedict[:n_images],
         savedict[:parallel],
+        savedict[:neb_optimiser],
         savedict[:remove_unconverged],
+        savedict[:vibration_displacement],
         savedict[:imaginary_freq_tol],
         savedict[:k_max],
         savedict[:t_unit],
         savedict[:t_mult],
-        savedict[:cached_rids],
+        rhashes,
         savedict[:ts_cache],
         sd,
         rd

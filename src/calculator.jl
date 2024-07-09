@@ -93,7 +93,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
     # Check the current calc.rd contains a subset of reactions in rd.
     verify_rd(calc.rd, rd)
     # Check the cache is not out of sync.
-    if count(calc.cached_rhashes) != length(calc.ts_cache[:xyz])
+    if length(calc.cached_rhashes) != length(calc.ts_cache[:xyz])
         throw(ErrorException("TS cache is out of sync! Ensure ts_cache entries match cached_rhashes."))
     end
 
