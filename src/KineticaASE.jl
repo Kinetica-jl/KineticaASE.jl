@@ -17,6 +17,7 @@ using BSON
 
 const version = VersionNumber(0, 1, 0)
 
+const np = PythonCall.pynew()
 const ase = PythonCall.pynew()
 const aseopt = PythonCall.pynew()
 const aseneb = PythonCall.pynew()
@@ -26,6 +27,7 @@ const asethermo = PythonCall.pynew()
 const ade = PythonCall.pynew()
 const rmsd = PythonCall.pynew()
 function __init__()
+    PythonCall.pycopy!(np, pyimport("numpy"))
     PythonCall.pycopy!(ase, pyimport("ase"))
     PythonCall.pycopy!(aseopt, pyimport("ase.optimize"))
     PythonCall.pycopy!(aseneb, pyimport("ase.neb"))

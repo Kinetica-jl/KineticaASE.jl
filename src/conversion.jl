@@ -10,7 +10,7 @@ these will be applied to the resultIng Atoms object through
 """
 function frame_to_atoms(frame::Dict{String, Any}, charges=nothing)
     symbols = join(frame["arrays"]["species"])
-    positions = frame["arrays"]["pos"]'
+    positions = np.asarray(frame["arrays"]["pos"]')
     atoms = ase.Atoms(symbols, positions=positions)
     if !isnothing(charges)
         if pylen(atoms) != length(charges)
