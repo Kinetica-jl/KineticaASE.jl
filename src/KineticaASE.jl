@@ -44,6 +44,7 @@ export frame_to_atoms, atoms_to_frame
 
 include("calculator.jl")
 export ASENEBCalculator
+export calculate_entropy_enthalpy
 
 include("neb.jl")
 

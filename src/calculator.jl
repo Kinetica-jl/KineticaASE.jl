@@ -554,16 +554,9 @@ function get_enthalpy(energy, vib_energies, geometry, T)
     return H
 end
 
-# Dispatched with k_max awareness.
 """
-    calculator(; T, P)
 """
-function (calc::ASENEBCalculator{uType, tType})(; T::Number, P::Number) where {uType, tType}
-    throw(ErrorException(""))
-end
-
-# Dispatched without k_max awareness.
-function (calc::ASENEBCalculator{Nothing, tType})(; T::Number, P::Number) where {tType}
+function calculate_entropy_enthalpy(calc::ASENEBCalculator, T, P)
     dS = zeros(calc.rd.nr)
     dH = zeros(calc.rd.nr)
     for rid in 1:calc.rd.nr
@@ -588,7 +581,27 @@ function (calc::ASENEBCalculator{Nothing, tType})(; T::Number, P::Number) where 
     # Convert from eV/K and eV to J/mol/K and J/mol
     dS ./= (ASEConstants.J/ASEConstants.mol)
     dH ./= (ASEConstants.J/ASEConstants.mol)
+
+    return dS, dH
+end
+
+# Dispatched with k_max awareness.
+"""
+    calculator(; T, P)
+"""
+function (calc::ASENEBCalculator{uType, tType})(; T::Number, P::Number) where {uType, tType}
+    dS, dH = calculate_entropy_enthalpy(calc, T, P)
+    k_r = Constants.k_b*T/Constants.h .* exp.(dS/Constants.R) .* exp.(-dH/(Constants.R*T))
+    k = 1.0 ./ ((1.0 / calc.k_max) .+ (1.0 ./ k_r))
+    k *= calc.t_mult
+    return k
+end
+
+# Dispatched without k_max awareness.
+function (calc::ASENEBCalculator{Nothing, tType})(; T::Number, P::Number) where {tType}
+    dS, dH = calculate_entropy_enthalpy(calc, T, P)
     k = Constants.k_b*T/Constants.h .* exp.(dS/Constants.R) .* exp.(-dH/(Constants.R*T))
+    k *= calc.t_mult
     return k
 end
 
