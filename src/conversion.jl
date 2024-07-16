@@ -1,14 +1,19 @@
 """
-    frame_to_atoms(frame[, charges=nothing])
+    frame_to_atoms(frame[, charges=nothing, magmoms=nothing])
 
 Converts an ExtXYZ frame to an ASE Atoms object.
 
 If the optional argument `charges` is provided with an 
-integer array of formal charges on the atoms on `frame`,
-these will be applied to the resultIng Atoms object through
+integer array of formal charges on the atoms in `frame`,
+these will be applied to the resulting Atoms object through
 `Atoms.set_initial_charges()`.
+
+If the optional argument `magmoms` is provided with an 
+array of initial magnetic moments for the atoms in `frame`,
+these will be applied to the resulting Atoms object through
+`Atoms.set_initial_magnetic_moments()`.
 """
-function frame_to_atoms(frame::Dict{String, Any}, charges=nothing)
+function frame_to_atoms(frame::Dict{String, Any}, charges=nothing, magmoms=nothing)
     symbols = join(frame["arrays"]["species"])
     positions = np.asarray(frame["arrays"]["pos"]')
     atoms = ase.Atoms(symbols, positions=positions)
@@ -17,6 +22,13 @@ function frame_to_atoms(frame::Dict{String, Any}, charges=nothing)
             throw(ArgumentError("Number of formal charges in `charges` must match number of atoms."))
         else
             atoms.set_initial_charges(charges)
+        end
+    end
+    if !isnothing(magmoms)
+        if pylen(atoms) != length(magmoms)
+            throw(ArgumentError("Number of initial magnetic moments in `magmoms` must match number of atoms."))
+        else
+            atoms.set_initial_magnetic_moments(np.asarray(magmoms))
         end
     end
     atoms.info = frame["info"]

@@ -1,27 +1,40 @@
 """
 """
-function get_rxn_mult(reacsys, prodsys)
-    n_reacs = reacsys["info"]["n_species"]
-    reac_mult = reacsys["info"]["mult"]
-    n_prods = prodsys["info"]["n_species"]
-    prod_mult = prodsys["info"]["mult"]
+get_initial_sys_mult(mults) = sum(mults) - (length(mults) - 1)
 
+
+"""
+"""
+function get_rxn_mult(n_reacs::Int, rmult::Int, n_prods::Int, pmult::Int)
     # Given an addition (2->1) or a dissociation (1->2), pick the lower mult.
     # Given a substitution (2->2) or a rearrangement (1->1), 
     # the mult should always be balanced.
     # However, abstractions from radicals can lead to
     # unbalanced mult, e.g. [CH2]C + [H] --> C=C + [H][H],
     # in which case the lower mult should be taken.
+    # There are also rare cases involving carbenes that 
+    # may be unbalanced, e.g. [CH]C --> C=C, in which
+    # case the lower mult should also be taken.
     if n_reacs > n_prods
-        return prod_mult
+        return pmult
     elseif n_reacs < n_prods
-        return reac_mult
-    elseif n_reacs == n_prods > 1
-        return min(reac_mult, prod_mult)
+        return rmult
+    elseif n_reacs == n_prods
+        return min(rmult, pmult)
     else
         throw(ErrorException("Reaction has one reactant and one product but mults do not match."))
     end
 end
+function get_rxn_mult(reacsys::Dict{String, Any}, prodsys::Dict{String, Any})
+    n_reacs = reacsys["info"]["n_species"]
+    reac_mult = reacsys["info"]["mult"]
+    n_prods = prodsys["info"]["n_species"]
+    prod_mult = prodsys["info"]["mult"]
+
+    return get_rxn_mult(n_reacs, reac_mult, n_prods, prod_mult)
+end
+
+
 
 
 """
@@ -51,12 +64,21 @@ Atoms objects.
 """
 function neb(reacsys, prodsys, calc::ASENEBCalculator; calcdir="./", kwargs...)
     @info "Running $(calc.climb ? "CI-" : "")NEB calculation"
+    rmult = reacsys["info"]["mult"]
+    half_images = ceil(Int64, calc.n_images/2)
     images = [
-        [frame_to_atoms(reacsys, reacsys["info"]["formal_charges"]) for _ in 1:calc.n_images-1]; 
-        [frame_to_atoms(prodsys, prodsys["info"]["formal_charges"])]
+        [frame_to_atoms(
+            reacsys, 
+            reacsys["info"]["formal_charges"], 
+            reacsys["info"]["initial_magmoms"]
+        ) for _ in 1:half_images]; 
+        [frame_to_atoms(
+            prodsys, 
+            prodsys["info"]["formal_charges"], 
+            prodsys["info"]["initial_magmoms"]
+        ) for _ in half_images+1:calc.n_images]
     ]
 
-    rmult = get_rxn_mult(reacsys, prodsys)
     if calc.parallel
         for image in images
             image.calc = calc.calc_builder(calcdir, rmult, reacsys["info"]["chg"], kwargs...)
@@ -134,5 +156,6 @@ function highest_energy_frame(images::Py)
     inertias = pyconvert(Vector{Float64}, images[ts_idx-1].get_moments_of_inertia())
     ts = atoms_to_frame(images[ts_idx-1], energies[ts_idx], inertias)
     ts["info"]["formal_charges"] = pyconvert(Vector{Float64}, images[ts_idx-1].get_initial_charges())
+    ts["info"]["initial_magmoms"] = pyconvert(Vector{Float64}, images[ts_idx-1].get_initial_magnetic_moments())
     return ts
 end

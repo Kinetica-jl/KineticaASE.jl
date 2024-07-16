@@ -26,6 +26,7 @@ const asevib = PythonCall.pynew()
 const asethermo = PythonCall.pynew()
 const ade = PythonCall.pynew()
 const rmsd = PythonCall.pynew()
+const rdSmilesParamsWithH = PythonCall.pynew()
 function __init__()
     PythonCall.pycopy!(np, pyimport("numpy"))
     PythonCall.pycopy!(ase, pyimport("ase"))
@@ -36,6 +37,9 @@ function __init__()
     PythonCall.pycopy!(asethermo, pyimport("ase.thermochemistry"))
     PythonCall.pycopy!(ade, pyimport("autode"))
     PythonCall.pycopy!(rmsd, pyimport("rmsd"))
+    smilesparams = rdChem.SmilesParserParams()
+    smilesparams.removeHs = false
+    PythonCall.pycopy!(rdSmilesParamsWithH, smilesparams)
 end
 
 include("constants.jl")
@@ -57,7 +61,7 @@ include("vibrations.jl")
 include("autode.jl")
 
 include("builders.jl")
-export EMTBuilder, NWChemDFTBuilder
+export EMTBuilder, NWChemDFTBuilder, FHIAimsBuilder
 
 include("io.jl")
 

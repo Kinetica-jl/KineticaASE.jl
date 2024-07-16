@@ -31,7 +31,7 @@ function calc_species_vibrations!(sd::SpeciesData, sid, calc_builder; calcdir::S
         return
     end
 
-    atoms = frame_to_atoms(sd.xyz[sid], sd.cache[:formal_charges][sid])
+    atoms = frame_to_atoms(sd.xyz[sid], sd.cache[:formal_charges][sid], sd.cache[:initial_magmoms][sid])
     atoms.calc = calc_builder(calcdir, sd.cache[:mult][sid], sd.cache[:charge][sid], kwargs...)
 
     vibdir = joinpath(calcdir, "vib")
@@ -83,7 +83,7 @@ Writes the vibrational energies in eV as an array into
 `ts_cache[:vib_energies]`.
 """
 function calc_ts_vibrations!(ts_cache::Dict{Symbol, Any}, rid, calc_builder; calcdir::String="./", delta=0.01, ivetol=0.1, kwargs...)
-    atoms = frame_to_atoms(ts_cache[:xyz][rid], ts_cache[:xyz][rid]["info"]["formal_charges"])
+    atoms = frame_to_atoms(ts_cache[:xyz][rid], ts_cache[:xyz][rid]["info"]["formal_charges"], ts_cache[:xyz][rid]["info"]["initial_magmoms"])
     atoms.calc = calc_builder(calcdir, ts_cache[:mult][rid], ts_cache[:charge][rid], kwargs...)
 
     vibdir = joinpath(calcdir, "vib")

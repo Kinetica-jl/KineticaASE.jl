@@ -92,31 +92,34 @@ end
 
 function (builder::FHIAimsBuilder)(dir::String, mult::Int, chg::Int, kwargs...)
     arg_dict = Dict(
-        "aims_command" => builder.command,
-        "outfilename" => joinpath(dir, "aims.out"),
-        "xc" => builder.xc,
-        "species_dir" => builder.species_dir,
-        "sc_iter_limit" => string(builder.maxiter)
+        :aims_command => builder.command,
+        :outfilename => joinpath(dir, "aims.out"),
+        :xc => builder.xc,
+        :species_dir => builder.species_dir,
+        :sc_iter_limit => string(builder.maxiter)
     )
     if !(builder.dispersion == "")
         if count(c->c==' ', builder.dispersion) == 0
-            arg_dict[builder.dispersion] = ""
+            arg_dict[Symbol(builder.dispersion)] = ""
         else
             disptype, dispargs = split(builder.dispersion, limit=2)
-            arg_dict[string(disptype)] = string(dispargs)
+            arg_dict[Symbol(disptype)] = string(dispargs)
         end
     end
     if !isnothing(builder.sc_accuracy_forces)
-        arg_dict["sc_accuracy_forces"] = builder.sc_accuracy_forces
+        arg_dict[:sc_accuracy_forces] = builder.sc_accuracy_forces
     else
-        arg_dict["compute_forces"] = ".true."
+        arg_dict[:compute_forces] = ".true."
     end
-    if !isnothing(builder.sc_accuracy_rho) arg_dict["sc_accuracy_rho"] = builder.sc_accuracy_rho end
-    if !isnothing(builder.sc_accuracy_etot) arg_dict["sc_accuracy_etot"] = builder.sc_accuracy_etot end
-    if !isnothing(builder.sc_accuracy_eev) arg_dict["sc_accuracy_eev"] = builder.sc_accuracy_eev end
+    if !isnothing(builder.sc_accuracy_rho) arg_dict[:sc_accuracy_rho] = builder.sc_accuracy_rho end
+    if !isnothing(builder.sc_accuracy_etot) arg_dict[:sc_accuracy_etot] = builder.sc_accuracy_etot end
+    if !isnothing(builder.sc_accuracy_eev) arg_dict[:sc_accuracy_eev] = builder.sc_accuracy_eev end
 
-    arg_dict["spin"] = mult > 1 ? "collinear" : "none"
-    arg_dict["charge"] = chg
+    arg_dict[:spin] = mult > 1 ? "collinear" : "none"
+    if mult > 1
+        arg_dict[:fixed_spin_moment] = string(mult-1)
+    end
+    arg_dict[:charge] = string(chg)
     
-    return builder.calc_class(arg_dict...)
+    return builder.calc_class(; arg_dict...)
 end

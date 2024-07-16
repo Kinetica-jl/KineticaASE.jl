@@ -48,6 +48,18 @@ function frame_to_autode(frame::Dict{String, Any}; mult::Int=1, chg::Int=0)
     return mol
 end
 
+
+"""
+"""
+autode_get_graph(sd::SpeciesData, i) = frame_to_autode(sd.xyz[i], mult=sd.cache[:mult][i], chg=sd.cache[:charge][i]).graph
+
+
+"""
+"""
+autode_is_isomorphic(graph1::Py, graph2::Py) = pyconvert(Bool, ade.mol_graphs.is_isomorphic(graph1, graph2))
+
+
+
 """
     autode_conformer_search!(sd::SpeciesData, i)
 

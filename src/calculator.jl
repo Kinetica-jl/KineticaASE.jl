@@ -11,6 +11,7 @@ mutable struct ASENEBCalculator{kmType, tType} <: Kinetica.AbstractKineticCalcul
     interpolation::String
     n_images::Int
     parallel::Bool
+    geom_optimiser::String
     neb_optimiser::String
     remove_unconverged::Bool
     vibration_displacement
@@ -27,8 +28,8 @@ end
 """
     ASENEBCalculator(calc_builder, calcdir_head[, 
         neb_k, ftol, climb, climb_ftol, maxiters,
-        interpolation, n_images, parallel, neb_optimiser,
-        remove_unconverged, vibration_displacement,
+        interpolation, n_images, parallel, geom_optimiser,
+        neb_optimiser, remove_unconverged, vibration_displacement,
         imaginary_freq_tol, ignore_imaginary_freqs, 
         k_max, t_unit])
 
@@ -36,13 +37,17 @@ Outer constructor method for ASE-driven NEB-based kinetic calculator.
 """
 function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, climb::Bool=true, climb_ftol=0.1,
                           maxiters=500, interpolation::String="idpp", n_images=11, parallel::Bool=false, 
-                          neb_optimiser::String="ode", remove_unconverged::Bool=true, vibration_displacement=1e-2,
-                          imaginary_freq_tol=1e-2, k_max::Union{Nothing, uType}=nothing, t_unit::String="s"
+                          geom_optimiser::String="BFGSLineSearch", neb_optimiser::String="ode", 
+                          remove_unconverged::Bool=true, vibration_displacement=1e-2, imaginary_freq_tol=1e-2, 
+                          k_max::Union{Nothing, uType}=nothing, t_unit::String="s"
                           ) where {uType <: AbstractFloat}
 
     # Sanitise arguments.
     if !(interpolation in ["linear", "idpp"])
         throw(ArgumentError("`interpolation` must be one of must be one of [\"linear\", \"idpp\"]"))
+    end
+    if !(geom_optimiser in ["BFGSLineSearch", "fire", "bfgs", "lbfgs"])
+        throw(ArgumentError("`neb_optimiser` must be one of [\"BFGSLineSearch\", \"fire\", \"bfgs\", \"lbfgs\"]"))
     end
     if !(neb_optimiser in ["ode", "fire", "lbfgs", "mdmin"])
         throw(ArgumentError("`neb_optimiser` must be one of [\"ode\", \"fire\", \"lbfgs\", \"mdmin\"]"))
@@ -80,7 +85,7 @@ function ASENEBCalculator(calc_builder, calcdir_head; neb_k=0.1, ftol=0.01, clim
         sd, rd = init_network()
     end
     return ASENEBCalculator(calc_builder, calcdir_head, neb_k, ftol, climb, climb_ftol, maxiters, 
-                            interpolation, n_images, parallel, neb_optimiser, remove_unconverged, 
+                            interpolation, n_images, parallel, geom_optimiser, neb_optimiser, remove_unconverged, 
                             vibration_displacement, imaginary_freq_tol, k_max, t_unit, tconvert(t_unit, "s"), 
                             cached_rhashes, ts_cache, sd, rd)
 end
@@ -123,6 +128,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             sd.cache[:charge] = Dict{iType, Int}()
             sd.cache[:formal_charges] = Dict{iType, Vector{Int}}()
             sd.cache[:geometry] = Dict{iType, Int}()
+            sd.cache[:initial_magmoms] = Dict{iType, Vector{Float64}}()
         end
     end
 
@@ -141,6 +147,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             if isdir(specoptdir) 
                 optfile = joinpath(specoptdir, "opt_final.bson")
                 if isfile(optfile)
+                    @debug "Found optimisation file for species $i ($(sd.toStr[i]))."
                     optgeom = load_optgeom(optfile)
                     sd.xyz[i] = optgeom[:frame]
                     sd.cache[:symmetry][i] = optgeom[:sym]
@@ -148,6 +155,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
                     get_mult!(sd, i)
                     get_charge!(sd, i) 
                     get_formal_charges!(sd, i)
+                    get_initial_magmoms!(sd, i)
                     @debug "Retrieved optimised geometry of species $i ($(sd.toStr[i])) from file."
                     opt_complete = true
                 end
@@ -161,11 +169,12 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
                 get_charge!(sd, i) 
                 autode_conformer_search!(sd, i)
                 get_formal_charges!(sd, i)
-                conv = geomopt!(sd, i, calc.calc_builder; maxiters=calc.maxiters)
+                get_initial_magmoms!(sd, i)
+                conv = geomopt!(sd, i, calc.calc_builder; optimiser=calc.geom_optimiser, maxiters=calc.maxiters)
                 if conv
                     save_optgeom(sd.xyz[i], sd.cache[:symmetry][i], sd.cache[:geometry][i], "opt_final.bson")
                 else
-                    @warn "Optimisation of species $i ($(sd.toStr[i])) failed to converge!"
+                    @warn "Geometry optimisation of species $i ($(sd.toStr[i])) failed!"
                 end
                 cd(currdir)
             end
@@ -214,6 +223,7 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             @info "Searching for completed calculations in $nebdir"
             if isfile(joinpath(nebdir, "endpts.bson"))
                 reacsys_mapped, prodsys_mapped = load_endpoints(joinpath(nebdir, "endpts.bson"))
+                rmult = get_rxn_mult(reacsys_mapped, prodsys_mapped)
                 endpoints_complete = true
                 @info "Found completed endpoint calculations."
             end
@@ -268,53 +278,76 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         # Create optimised non-covalent interacting reaction complexes for
         # reactants and products if required.
         if !endpoints_complete
-            if sum(rd.stoic_reacs[i]) > 1
-                reac_sids = []
-                for (j, sid) in enumerate(rd.id_reacs[i])
-                    for _ in 1:rd.stoic_reacs[i][j]
-                        push!(reac_sids, sid)
-                    end
+            # Determine best multiplicity for reactants and products.
+            n_reacs = sum(rd.stoic_reacs[i])
+            reac_sids = []
+            for (j, sid) in enumerate(rd.id_reacs[i])
+                for _ in 1:rd.stoic_reacs[i][j]
+                    push!(reac_sids, sid)
                 end
+            end
+            n_prods = sum(rd.stoic_prods[i])
+            prod_sids = []
+            for (j, sid) in enumerate(rd.id_prods[i])
+                for _ in 1:rd.stoic_prods[i][j]
+                    push!(prod_sids, sid)
+                end
+            end
+            initial_reacsys_mult = get_initial_sys_mult([sd.cache[:mult][sid] for sid in reac_sids])
+            initial_prodsys_mult = get_initial_sys_mult([sd.cache[:mult][sid] for sid in prod_sids])
+            rmult = get_rxn_mult(n_reacs, initial_reacsys_mult, n_prods, initial_prodsys_mult)
+            @debug "Assuming best overall reaction multiplicity of $rmult."
+
+            if n_reacs > 1
                 reacsys = autode_NCI_conformer_search(sd, reac_sids; name="reacsys")
                 reacsys["info"]["n_species"] = length(reac_sids)
                 reacsys_smi = join([sd.toStr[sid] for sid in reac_sids], ".")
-                formal_charges = get_formal_charges(atom_map_smiles(reacsys, reacsys_smi))
-                safe_geomopt!(reacsys, calc.calc_builder; calcdir=nebdir, mult=reacsys["info"]["mult"], 
-                            chg=reacsys["info"]["chg"], formal_charges=formal_charges, maxiters=calc.maxiters)
             else
                 sid = rd.id_reacs[i][1]
                 reacsys = sd.xyz[sid]
-                reacsys["info"]["mult"] = sd.cache[:mult][sid]
+                reacsys_smi = sd.toStr[sid]
                 reacsys["info"]["chg"] = sd.cache[:charge][sid]
                 reacsys["info"]["n_species"] = 1
             end
-            @info "Assembled reactant system."
-            if sum(rd.stoic_prods[i]) > 1
-                prod_sids = []
-                for (j, sid) in enumerate(rd.id_prods[i])
-                    for _ in 1:rd.stoic_prods[i][j]
-                        push!(prod_sids, sid)
-                    end
-                end
+            reacsys["info"]["mult"] = rmult
+            reacsys_amsmi = atom_map_smiles(reacsys, reacsys_smi)
+            reacsys_formal_charges = get_formal_charges(reacsys_amsmi)
+            reacsys_initial_magmoms = get_initial_magmoms(reacsys_amsmi)
+
+            if n_prods > 1
                 prodsys = autode_NCI_conformer_search(sd, prod_sids; name="prodsys")
                 if prodsys["info"]["chg"] != reacsys["info"]["chg"]
                     throw(ErrorException("Charge not conserved in reaction $i: chg(R) = $(reacsys["info"]["chg"]), chg(P) = $(prodsys["info"]["chg"])"))
                 end
                 prodsys["info"]["n_species"] = length(prod_sids)
                 prodsys_smi = join([sd.toStr[sid] for sid in prod_sids], ".")
-                formal_charges = get_formal_charges(atom_map_smiles(prodsys, prodsys_smi))
-                safe_geomopt!(prodsys, calc.calc_builder; calcdir=nebdir, mult=prodsys["info"]["mult"], 
-                            chg=prodsys["info"]["chg"], formal_charges=formal_charges, maxiters=calc.maxiters)
             else
                 sid = rd.id_prods[i][1]
                 if sd.cache[:charge][sid] != reacsys["info"]["chg"]
                     throw(ErrorException("Charge not conserved in reaction $i: chg(R) = $(reacsys["info"]["chg"]), chg(P) = $(sd.cache[:charge][sid])"))
                 end
                 prodsys = sd.xyz[sid]
-                prodsys["info"]["mult"] = sd.cache[:mult][sid]
+                prodsys_smi = sd.toStr[sid]
                 prodsys["info"]["chg"] = sd.cache[:charge][sid]
                 prodsys["info"]["n_species"] = 1
             end
+            prodsys["info"]["mult"] = rmult
+            prodsys_amsmi = atom_map_smiles(prodsys, prodsys_smi)
+            prodsys_formal_charges = get_formal_charges(prodsys_amsmi)
+            prodsys_initial_magmoms = get_initial_magmoms(prodsys_amsmi)
+
+            correct_magmoms_for_mult!(reacsys_initial_magmoms, prodsys_initial_magmoms, rmult)
+
+            safe_geomopt!(reacsys, calc.calc_builder; calcdir=nebdir, mult=rmult, 
+                          chg=reacsys["info"]["chg"], formal_charges=reacsys_formal_charges, 
+                          initial_magmoms=reacsys_initial_magmoms, optimiser=calc.geom_optimiser,
+                          maxiters=calc.maxiters)
+            @info "Assembled reactant system."
+
+            safe_geomopt!(prodsys, calc.calc_builder; calcdir=nebdir, mult=rmult, 
+                          chg=prodsys["info"]["chg"], formal_charges=prodsys_formal_charges, 
+                          initial_magmoms=prodsys_initial_magmoms, optimiser=calc.geom_optimiser,
+                          maxiters=calc.maxiters)
             @info "Assembled product system."
 
             # Atom map endpoints.
@@ -324,8 +357,11 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             reac_map, prod_map = string(reac_map), string(prod_map)
             reacsys_mapped = atom_map_frame(reac_map, reacsys)
             reacsys_mapped["info"]["formal_charges"] = get_formal_charges(reac_map)
+            reacsys_mapped["info"]["initial_magmoms"] = get_initial_magmoms(reac_map)
             prodsys_mapped = atom_map_frame(prod_map, prodsys)
             prodsys_mapped["info"]["formal_charges"] = get_formal_charges(prod_map)
+            prodsys_mapped["info"]["initial_magmoms"] = get_initial_magmoms(prod_map)
+            correct_magmoms_for_mult!(reacsys_mapped["info"]["initial_magmoms"], prodsys_mapped["info"]["initial_magmoms"], rmult)
             @info "Remapped atom indices."
 
             # Kabsch fit product system onto reactant system.
@@ -341,18 +377,17 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         if !neb_complete
             images, conv = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
             ts = highest_energy_frame(images)
-            rxn_mult = get_rxn_mult(reacsys_mapped, prodsys_mapped)
-            ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rxn_mult, chg=prodsys_mapped["info"]["chg"])
+            ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rmult, chg=prodsys_mapped["info"]["chg"])
 
             # Save TS data.
-            save_tsdata(ts, conv, rxn_mult, ts_sym, ts_geom, prodsys_mapped["info"]["chg"], "ts.bson")
+            save_tsdata(ts, conv, rmult, ts_sym, ts_geom, prodsys_mapped["info"]["chg"], "ts.bson")
 
             # Save to caches.
             # If unconverged and removal is requested, push blank
             # entries to caches so splice! still works at the end.
             if conv || !(calc.remove_unconverged)
                 push!(calc.ts_cache[:xyz], ts)
-                push!(calc.ts_cache[:mult], rxn_mult)
+                push!(calc.ts_cache[:mult], rmult)
                 push!(calc.ts_cache[:charge], prodsys_mapped["info"]["chg"])
                 push!(calc.ts_cache[:symmetry], ts_sym)
                 push!(calc.ts_cache[:geometry], ts_geom)
@@ -434,6 +469,9 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
     # Share final CRN with calculator. 
     calc.sd = sd
     calc.rd = rd
+
+    # Save calculator checkpoint.
+    # save_asecalc(calc, joinpath(calc.calcdir_head, "asecalc_chk.bson"))
 
     return
 end

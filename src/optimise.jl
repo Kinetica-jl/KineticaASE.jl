@@ -35,9 +35,103 @@ function get_formal_charges(sd::SpeciesData, i)
 end
 get_formal_charges!(sd::SpeciesData, i) = sd.cache[:formal_charges][i] = get_formal_charges(sd, i)
 
+
 """
-    geomopt!(frame::Dict{String, Any}, calc_builder[, mult::Int=1, chg::Int=0, formal_charges=nothing, fmax=0.01, maxiters=nothing, kwargs...])
-    geomopt!(sd::SpeciesData, i, calc_builder[, fmax=0.01, maxiters=nothing, kwargs...])
+"""
+function get_initial_magmoms(amsmi::String)
+    mol = rdChem.MolFromSmiles(amsmi, rdSmilesParamsWithH)
+    magmoms = zeros(Float64, pyconvert(Int, mol.GetNumAtoms()))
+    for atom in mol.GetAtoms()
+        magmoms[pyconvert(Int, atom.GetAtomMapNum())] = pyconvert(Float64, atom.GetNumRadicalElectrons())
+    end
+    return magmoms
+end 
+function get_initial_magmoms(sd::SpeciesData, i)
+    amsmi = atom_map_smiles(sd.xyz[i], sd.toStr[i])
+    return get_initial_magmoms(amsmi)
+end
+get_initial_magmoms!(sd::SpeciesData, i) = sd.cache[:initial_magmoms][i] = get_initial_magmoms(sd, i)
+
+
+"""
+"""
+function correct_magmoms_for_mult!(reac_magmoms::Vector{Float64}, prod_magmoms::Vector{Float64}, mult::Int)
+    mdiff(i_magmoms) = (sum(i_magmoms) + 1) - mult
+
+    i_reac_magmoms = [Int(i) for i in reac_magmoms]
+    i_prod_magmoms = [Int(i) for i in prod_magmoms]
+
+    # Check for existing match.
+    rdiff = mdiff(i_reac_magmoms)
+    pdiff = mdiff(i_prod_magmoms)
+    if rdiff == 0 && pdiff == 0
+        @debug "Initial magnetic moments match reaction spin multiplicity."
+        return
+    end
+
+    reactive_idxs = [i for i in 1:length(reac_magmoms) if i_reac_magmoms[i] != i_prod_magmoms[i]]
+    lone_flippable_reac_idxs = [i for i in reactive_idxs if i_reac_magmoms[i] == 1]
+    lone_flippable_prod_idxs = [i for i in reactive_idxs if i_prod_magmoms[i] == 1]
+    double_flippable_reac_idxs = [i for i in reactive_idxs if i_reac_magmoms[i] == 2]
+    double_flippable_prod_idxs = [i for i in reactive_idxs if i_prod_magmoms[i] == 2]
+    if rdiff != 0 && length(lone_flippable_reac_idxs)+length(double_flippable_reac_idxs) == 0
+        error("Reactant magmoms cannot be corrected to match reaction multiplicity (no lone radical electrons).")
+    elseif pdiff != 0 && length(lone_flippable_prod_idxs)+length(double_flippable_prod_idxs) == 0
+        error("Product magmoms cannot be corrected to match reaction multiplicity (no lone radical electrons).")
+    end
+
+    while rdiff != 0
+        # Prefer lone electron spin flips where possible.
+        if length(lone_flippable_reac_idxs) >= rdiff
+            flip_idx = pop!(lone_flippable_reac_idxs)
+            @debug "Flipping initial magmom of lone electron in atom $(flip_idx) of reactant."
+            i_reac_magmoms[flip_idx] *= -1
+            rdiff = mdiff(i_reac_magmoms)
+        # Do double flips if diff cannot be resolved with lone flips.
+        elseif length(double_flippable_reac_idxs) != 0
+            flip_idx = pop!(double_flippable_reac_idxs)
+            @debug "Flipping initial magmom of electron pair in atom $(flip_idx) of reactant."
+            i_reac_magmoms[flip_idx] = i_reac_magmoms[flip_idx]==0 ? 2 : 0
+            rdiff = mdiff(i_reac_magmoms)
+        else
+            error("Reactant magmoms cannot be corrected to match reaction multiplicity.")
+        end
+    end
+
+    while pdiff != 0
+        # Prefer lone electron spin flips where possible.
+        if length(lone_flippable_prod_idxs) >= pdiff
+            flip_idx = pop!(lone_flippable_prod_idxs)
+            @debug "Flipping initial magmom of lone electron in atom $(flip_idx) of product."
+            i_prod_magmoms[flip_idx] *= -1
+            pdiff = mdiff(i_prod_magmoms)
+        # Do double flips if diff cannot be resolved with lone flips.
+        elseif length(double_flippable_prod_idxs) != 0
+            flip_idx = pop!(double_flippable_prod_idxs)
+            @debug "Flipping initial magmom of electron pair in atom $(flip_idx) of product."
+            i_prod_magmoms[flip_idx] = i_prod_magmoms[flip_idx]==0 ? 2 : 0
+            pdiff = mdiff(i_prod_magmoms)
+        else
+            error("Product magmoms cannot be corrected to match reaction multiplicity.")
+        end
+    end
+
+    for i in axes(reac_magmoms, 1)
+        reac_magmoms[i] = float(i_reac_magmoms[i])
+    end
+    for i in axes(prod_magmoms, 1)
+        prod_magmoms[i] = float(i_prod_magmoms[i])
+    end
+    return
+end
+
+
+"""
+    geomopt!(frame::Dict{String, Any}, calc_builder[, mult::Int=1, chg::Int=0, formal_charges=nothing, 
+             initial_magmoms=nothing, optimiser="LBFGSLineSearch", fmax=0.01, maxiters=1000, 
+             check_isomorphic=true, kwargs...])
+    geomopt!(sd::SpeciesData, i, calc_builder[, optimiser="LBFGSLineSearch", fmax=0.01, maxiters=nothing, 
+             kwargs...])
 
 Runs an ASE-driven geometry optimisation of the species in `frame`.
 
@@ -75,29 +169,43 @@ Directly modifies the atomic positions and energy of the
 passed in `frame`. Energies returned are in eV. Returns a
 boolean for whether the optimisation was a conv.
 """
-function geomopt!(sd::SpeciesData, i, calc_builder; calcdir::String="./", fmax=0.01, maxiters=nothing, kwargs...)
+function geomopt!(sd::SpeciesData, i, calc_builder; calcdir::String="./", 
+                  optimiser="LBFGSLineSearch", fmax=0.01, maxiters=1000, 
+                  check_isomorphic=true, kwargs...)
     frame = sd.xyz[i]
     conv = geomopt!(frame, calc_builder; calcdir=calcdir, mult=sd.cache[:mult][i], chg=sd.cache[:charge][i],
-                    formal_charges=sd.cache[:formal_charges][i], fmax=fmax, maxiters=maxiters,
-                    kwargs...)
+                    formal_charges=sd.cache[:formal_charges][i], initial_magmoms=sd.cache[:initial_magmoms][i],
+                    optimiser=optimiser, fmax=fmax, maxiters=maxiters, check_isomorphic=check_isomorphic, kwargs...)
     sd.xyz[i] = frame
     return conv
 end
 
 function geomopt!(frame::Dict{String, Any}, calc_builder; 
                   calcdir::String="./", mult::Int=1, chg::Int=0, 
-                  formal_charges=nothing, fmax=0.01, maxiters=nothing,
-                  kwargs...)
+                  formal_charges=nothing, initial_magmoms=nothing,
+                  optimiser="LBFGSLineSearch", fmax=0.01, maxiters=1000, 
+                  check_isomorphic=true, kwargs...)
     @debug "Starting geometry optimisation."
-    atoms = frame_to_atoms(frame, formal_charges)
+    atoms = frame_to_atoms(frame, formal_charges, initial_magmoms)
     atoms.calc = calc_builder(calcdir, mult, chg, kwargs...)
     init_energy = pyconvert(Float64, atoms.get_potential_energy())
     init_inertias = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
 
+    if optimiser == "BFGSLineSearch"
+        opt = aseopt.QuasiNewton(atoms)
+    elseif optimiser == "fire"    
+        opt = aseopt.FIRE(atoms)
+    elseif optimiser == "bfgs"
+        opt = aseopt.BFGS(atoms)
+    elseif optimiser == "lbfgs"
+        opt = aseopt.LBFGS(atoms)
+    else
+        throw(ArgumentError("Unknown optimiser, must be one of [\"BFGSLineSearch\", \"fire\", \"bfgs\", \"lbfgs\"]"))
+    end
+
     # Optimise with Python exception catching.
-    # Also check forces when 10% of the way in to Ensure
+    # Also check forces when 10% of the way in to ensure
     # system has not exploded beyond repair.
-    opt = aseopt.QuasiNewton(atoms); 
     conv = false; checkiters = Int(floor(maxiters/10))
     try
         conv = opt.run(fmax=fmax, steps=checkiters)
@@ -112,6 +220,15 @@ function geomopt!(frame::Dict{String, Any}, calc_builder;
         end
     catch err
         conv = false
+    end
+
+    if conv && check_isomorphic
+        graph_preopt = frame_to_autode(frame; mult=mult, chg=chg).graph
+        graph_postopt = frame_to_autode(atoms_to_frame(atoms); mult=mult, chg=chg).graph
+        if !autode_is_isomorphic(graph_preopt, graph_postopt)
+            conv = false
+            @debug "Geometry optimisation breaks molecular graph."
+        end
     end
 
     if conv
@@ -132,17 +249,27 @@ end
 """
 function safe_geomopt!(frame::Dict{String, Any}, calc_builder; 
                        calcdir::String="./", mult::Int=1, chg::Int=0, 
-                       formal_charges=nothing, fmax=0.01, maxiters=nothing,
+                       formal_charges=nothing, initial_magmoms=nothing,
+                       optimiser="LBFGSLineSearch", fmax=0.01, maxiters=nothing, 
                        kwargs...)
     @debug "Starting geometry optimisation (safe)."
-    ademol_orig = frame_to_autode(frame; mult=mult, chg=chg)
-
-    atoms = frame_to_atoms(frame, formal_charges)
+    atoms = frame_to_atoms(frame, formal_charges, initial_magmoms)
     atoms.calc = calc_builder(calcdir, mult, chg, kwargs...)
     init_energy = pyconvert(Float64, atoms.get_potential_energy())
     init_inertias = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
 
-    opt = aseopt.QuasiNewton(atoms); 
+    if optimiser == "BFGSLineSearch"
+        opt = aseopt.QuasiNewton(atoms)
+    elseif optimiser == "fire"    
+        opt = aseopt.FIRE(atoms)
+    elseif optimiser == "bfgs"
+        opt = aseopt.BFGS(atoms)
+    elseif optimiser == "lbfgs"
+        opt = aseopt.LBFGS(atoms)
+    else
+        throw(ArgumentError("Unknown optimiser, must be one of [\"BFGSLineSearch\", \"fire\", \"bfgs\", \"lbfgs\"]"))
+    end
+
     conv = false; checkiters = Int(floor(maxiters/10))
     try
         conv = opt.run(fmax=fmax, steps=checkiters)
@@ -161,15 +288,15 @@ function safe_geomopt!(frame::Dict{String, Any}, calc_builder;
 
     if conv
         @debug "Geometry optimisation complete."
-        optframe = atoms_to_frame(atoms, pyconvert(Float64, atoms.get_potential_energy()), 
-                                pyconvert(Vector{Float64}, atoms.get_moments_of_inertia()))
-        ademol_opt = frame_to_autode(optframe; mult=mult, chg=chg)
-        if !pyconvert(Bool, ade.mol_graphs.is_isomorphic(ademol_orig.graph, ademol_opt.graph))
+        graph_preopt = frame_to_autode(frame; mult=mult, chg=chg).graph
+        graph_postopt = frame_to_autode(atoms_to_frame(atoms); mult=mult, chg=chg).graph
+        if !autode_is_isomorphic(graph_preopt, graph_postopt)
             @warn "Optimised geometry invalidates molecular graph, reverting to unoptimised geometry."
             frame["info"]["energy_ASE"] = init_energy
             frame["arrays"]["inertias"] = init_inertias
             conv = false
         else
+            aseio.write(joinpath(calcdir, "ase_opt.xyz"), atoms, append=true)
             frame["arrays"]["pos"] = pyconvert(Matrix, atoms.get_positions().T)
             frame["info"]["energy_ASE"] = pyconvert(Float64, atoms.get_potential_energy())
             frame["arrays"]["inertias"] = pyconvert(Vector{Float64}, atoms.get_moments_of_inertia())
@@ -263,6 +390,8 @@ function permute_hydrogens!(frame1::Dict{String, Any}, hidxs::Vector{Vector{Int}
         c1 = rmsd.kabsch_fit(best_pos, c2)
     end
 
+    # Any hydrogens with a charge/spin should not isolated and therefore 
+    # not swappable, so shouldn't need to be changed here.
     frame1["arrays"]["pos"] = pyconvert(Matrix, c1.T)
     return
 end
