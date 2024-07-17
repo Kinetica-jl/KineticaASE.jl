@@ -107,13 +107,13 @@ function (builder::FHIAimsBuilder)(dir::String, mult::Int, chg::Int, kwargs...)
         end
     end
     if !isnothing(builder.sc_accuracy_forces)
-        arg_dict[:sc_accuracy_forces] = builder.sc_accuracy_forces
+        arg_dict[:sc_accuracy_forces] = string(builder.sc_accuracy_forces)
     else
         arg_dict[:compute_forces] = ".true."
     end
-    if !isnothing(builder.sc_accuracy_rho) arg_dict[:sc_accuracy_rho] = builder.sc_accuracy_rho end
-    if !isnothing(builder.sc_accuracy_etot) arg_dict[:sc_accuracy_etot] = builder.sc_accuracy_etot end
-    if !isnothing(builder.sc_accuracy_eev) arg_dict[:sc_accuracy_eev] = builder.sc_accuracy_eev end
+    if !isnothing(builder.sc_accuracy_rho) arg_dict[:sc_accuracy_rho] = string(builder.sc_accuracy_rho) end
+    if !isnothing(builder.sc_accuracy_etot) arg_dict[:sc_accuracy_etot] = string(builder.sc_accuracy_etot) end
+    if !isnothing(builder.sc_accuracy_eev) arg_dict[:sc_accuracy_eev] = string(builder.sc_accuracy_eev) end
 
     arg_dict[:spin] = mult > 1 ? "collinear" : "none"
     if mult > 1
