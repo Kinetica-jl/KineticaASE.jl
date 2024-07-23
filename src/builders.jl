@@ -63,6 +63,7 @@ mutable struct FHIAimsBuilder
     xc::String
     species_dir::String
     maxiter::Int
+    sc_init_iter::Int
     dispersion::String
     sc_accuracy_rho::Union{Nothing, Float64}
     sc_accuracy_forces::Union{Nothing, Float64}
@@ -75,6 +76,7 @@ function FHIAimsBuilder(;
         xc::String="pbe",
         species_dir::String="./species_defaults/defaults_2020/tight",
         maxiter::Int=1000,
+        sc_init_iter::Int=1001
         dispersion::String="",
         sc_accuracy_rho::Union{Nothing, Float64}=nothing,
         sc_accuracy_forces::Union{Nothing, Float64}=nothing,
@@ -86,7 +88,7 @@ function FHIAimsBuilder(;
     end
 
     aims = pyimport("ase.calculators.aims")
-    return FHIAimsBuilder(aims.Aims, command, xc, species_dir, maxiter, dispersion,
+    return FHIAimsBuilder(aims.Aims, command, xc, species_dir, maxiter, sc_init_iter, dispersion,
                           sc_accuracy_rho, sc_accuracy_forces, sc_accuracy_etot, sc_accuracy_eev)
 end
 
@@ -96,6 +98,7 @@ function (builder::FHIAimsBuilder)(dir::String, mult::Int, chg::Int, kwargs...)
         :outfilename => joinpath(dir, "aims.out"),
         :xc => builder.xc,
         :species_dir => builder.species_dir,
+        :sc_init_iter => string(builder.sc_init_iter),
         :sc_iter_limit => string(builder.maxiter)
     )
     if !(builder.dispersion == "")
