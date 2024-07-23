@@ -112,20 +112,25 @@ function neb(reacsys, prodsys, calc::ASENEBCalculator; calcdir="./", kwargs...)
         throw(ArgumentError("Unknown optimiser, must be one of [\"ode\", \"fire\", \"lbfgs\", \"mdmin\"]"))
     end
     
-    if calc.climb
-        @debug "Running NEB to tolerance of $(calc.climb_ftol) before enabling CI"
-        conv = opt.run(fmax=calc.climb_ftol, steps=calc.maxiters)
-        conv = pyconvert(Bool, pybuiltins.bool(conv))
-        if conv
-            @debug "Running CI-NEB to tolerance of $(calc.ftol)"
-            neb.climb = true
+    conv = false
+    try
+        if calc.climb
+            @debug "Running NEB to tolerance of $(calc.climb_ftol) before enabling CI"
+            conv = opt.run(fmax=calc.climb_ftol, steps=calc.maxiters)
+            conv = pyconvert(Bool, pybuiltins.bool(conv))
+            if conv
+                @debug "Running CI-NEB to tolerance of $(calc.ftol)"
+                neb.climb = true
+                conv = opt.run(fmax=calc.ftol, steps=calc.maxiters)
+                conv = pyconvert(Bool, pybuiltins.bool(conv))
+            end
+        else
+            @debug "Running NEB to tolerance of $(calc.ftol)"
             conv = opt.run(fmax=calc.ftol, steps=calc.maxiters)
             conv = pyconvert(Bool, pybuiltins.bool(conv))
         end
-    else
-        @debug "Running NEB to tolerance of $(calc.ftol)"
-        conv = opt.run(fmax=calc.ftol, steps=calc.maxiters)
-        conv = pyconvert(Bool, pybuiltins.bool(conv))
+    catch err
+        conv = false
     end
     aseio.write(joinpath(calcdir, "neb_final.traj"), images)
 
