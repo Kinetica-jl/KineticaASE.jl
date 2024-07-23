@@ -76,7 +76,7 @@ function FHIAimsBuilder(;
         xc::String="pbe",
         species_dir::String="./species_defaults/defaults_2020/tight",
         maxiter::Int=1000,
-        sc_init_iter::Int=1001
+        sc_init_iter::Int=1001,
         dispersion::String="",
         sc_accuracy_rho::Union{Nothing, Float64}=nothing,
         sc_accuracy_forces::Union{Nothing, Float64}=nothing,
