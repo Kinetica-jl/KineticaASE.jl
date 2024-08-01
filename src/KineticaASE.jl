@@ -44,6 +44,7 @@ end
 
 include("constants.jl")
 using .ASEConstants
+export ASEConstants
 
 include("conversion.jl")
 export frame_to_atoms, atoms_to_frame
@@ -64,5 +65,8 @@ include("builders.jl")
 export EMTBuilder, NWChemDFTBuilder, FHIAimsBuilder
 
 include("io.jl")
+
+include("asethermo_interface.jl")
+export calculate_ase_idealgasthermo
 
 end
