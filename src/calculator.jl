@@ -518,8 +518,9 @@ function get_entropy(mass, inertias, geometry, symmetry, mult, vib_energies, T, 
     # Translational entropy
     mass_kg = mass * ASEConstants.amu
     S_t = (2.0 * pi * mass_kg * ASEConstants.k * T / (ASEConstants.hplanck^2))^1.5
-    S_t *= ASEConstants.kB * T / ASEConstants.ref_P
-    S_t = ASEConstants.kB * (log10(S_t) + 2.5)
+    S_t *= ASEConstants.k * T / ASEConstants.ref_P
+    S_t = ASEConstants.kB * (log(S_t) + 2.5)
+    println("S_t = $(S_t)")
     S += S_t
 
     # Rotational entropy
@@ -527,31 +528,37 @@ function get_entropy(mass, inertias, geometry, symmetry, mult, vib_energies, T, 
         inertias_conv = inertias * ASEConstants.amu / (10.0^10)^2
         inertia = maximum(inertias_conv)
         S_r = 8.0 * pi^2 * inertia * ASEConstants.k * T / symmetry / ASEConstants.hplanck^2
-        S_r = ASEConstants.kB * (log10(S_r) + 1.0)
+        S_r = ASEConstants.kB * (log(S_r) + 1.0)
     elseif geometry == 2
         inertias_conv = inertias * ASEConstants.amu / (10.0^10)^2
         S_r = sqrt(pi * prod(inertias_conv)) / symmetry
         S_r *= (8.0 * pi^2 * ASEConstants.k * T / ASEConstants.hplanck^2)^1.5
-        S_r = ASEConstants.kB * (log10(S_r) + 1.5)
+        S_r = ASEConstants.kB * (log(S_r) + 1.5)
     else
         S_r = 0.0
     end
+    println("S_r = $(S_r)")
     S += S_r
 
     # Electronic entropy
-    S += ASEConstants.kB * log10(mult)
+    S_e = ASEConstants.kB * log(mult)
+    println("S_e = $(S_e)")
+    S += S_e
 
     # Vibrational entropy
     kT = ASEConstants.kB * T
     S_v = 0.0
     for e in vib_energies
         x = e/kT
-        S_v += x / (exp(x) - 1.0) - log10(1.0 - exp(-x))
+        S_v += x / (exp(x) - 1.0) - log(1.0 - exp(-x))
     end
-    S += S_v * ASEConstants.kB
+    S_v *= ASEConstants.kB
+    println("S_v = $(S_v)")
+    S += S_v
 
     # Pressure correction to translational entropy
-    S_p = -ASEConstants.kB * log10(P / ASEConstants.ref_P)
+    S_p = -ASEConstants.kB * log(P / ASEConstants.ref_P)
+    println("S_p = $(S_p)")
     S += S_p
 
     return S
