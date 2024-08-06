@@ -520,7 +520,6 @@ function get_entropy(mass, inertias, geometry, symmetry, mult, vib_energies, T, 
     S_t = (2.0 * pi * mass_kg * ASEConstants.k * T / (ASEConstants.hplanck^2))^1.5
     S_t *= ASEConstants.k * T / ASEConstants.ref_P
     S_t = ASEConstants.kB * (log(S_t) + 2.5)
-    println("S_t = $(S_t)")
     S += S_t
 
     # Rotational entropy
@@ -537,12 +536,10 @@ function get_entropy(mass, inertias, geometry, symmetry, mult, vib_energies, T, 
     else
         S_r = 0.0
     end
-    println("S_r = $(S_r)")
     S += S_r
 
     # Electronic entropy
     S_e = ASEConstants.kB * log(mult)
-    println("S_e = $(S_e)")
     S += S_e
 
     # Vibrational entropy
@@ -553,12 +550,10 @@ function get_entropy(mass, inertias, geometry, symmetry, mult, vib_energies, T, 
         S_v += x / (exp(x) - 1.0) - log(1.0 - exp(-x))
     end
     S_v *= ASEConstants.kB
-    println("S_v = $(S_v)")
     S += S_v
 
     # Pressure correction to translational entropy
     S_p = -ASEConstants.kB * log(P / ASEConstants.ref_P)
-    println("S_p = $(S_p)")
     S += S_p
 
     return S
