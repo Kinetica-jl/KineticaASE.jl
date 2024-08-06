@@ -1,4 +1,6 @@
 [deps]
 autode = ""
 rmsd = ""
-ase = ""
+ase = "<3.23"
+numpy = "<2"
+scipy = "<=1.5.4"
