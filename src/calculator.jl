@@ -229,7 +229,13 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             end
             if isfile(joinpath(nebdir, "ts.bson"))
                 tsdata = load_tsdata(joinpath(nebdir, "ts.bson"))
-                if tsdata[:conv] || !(calc.remove_unconverged)
+                # This branch accounts for situations in which
+                #   (a). the TS is actually converged, and may have vibdata
+                #   (b). the TS is unconverged but does exist as a geometry, and may have vibdata
+                # 
+                # This is necessarily different to the else branch, where
+                # the TS is unconverged and doesn't exist, and does not have vibdata.
+                if tsdata[:conv] || (!(calc.remove_unconverged) && length(tsdata[:xyz]) > 0)
                     push!(calc.ts_cache[:xyz], tsdata[:xyz])
                     push!(calc.ts_cache[:mult], tsdata[:mult])
                     push!(calc.ts_cache[:charge], tsdata[:charge])
@@ -239,7 +245,11 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
                     push!(calc.ts_cache[:reacsys_energies], reacsys_mapped["info"]["energy_ASE"])
                     push!(calc.ts_cache[:prodsys_energies], prodsys_mapped["info"]["energy_ASE"])
                     neb_complete = true
-                    @info "Found completed NEB calculation."
+                    if tsdata[:conv]
+                        @info "Found completed NEB calculation."
+                    else 
+                        @info "Found completed NEB calculation (unconverged)."
+                    end
 
                     if isfile(joinpath(nebdir, "vib.bson"))
                         vibdata = load_vibdata(joinpath(nebdir, "vib.bson"))
@@ -376,8 +386,13 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         # Interpolate and run NEB.
         if !neb_complete
             images, conv = neb(reacsys_mapped, prodsys_mapped, calc; calcdir=nebdir)
-            ts = highest_energy_frame(images)
-            ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rmult, chg=prodsys_mapped["info"]["chg"])
+            if conv
+                ts = highest_energy_frame(images)
+                ts_sym, ts_geom = autode_frame_symmetry(ts; mult=rmult, chg=prodsys_mapped["info"]["chg"])
+            else
+                ts = Dict{String, Any}()
+                ts_sym, ts_geom = -1, -1
+            end
 
             # Save TS data.
             save_tsdata(ts, conv, rmult, ts_sym, ts_geom, prodsys_mapped["info"]["chg"], "ts.bson")
@@ -385,7 +400,9 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
             # Save to caches.
             # If unconverged and removal is requested, push blank
             # entries to caches so splice! still works at the end.
-            if conv || !(calc.remove_unconverged)
+            # Ensure that there is actially a TS geometry to push
+            # if this is the case though.
+            if conv || (!(calc.remove_unconverged) && length(ts) > 0)
                 push!(calc.ts_cache[:xyz], ts)
                 push!(calc.ts_cache[:mult], rmult)
                 push!(calc.ts_cache[:charge], prodsys_mapped["info"]["chg"])
@@ -456,7 +473,13 @@ function Kinetica.setup_network!(sd::SpeciesData{iType}, rd::RxData, calc::ASENE
         end
     end
 
-    # Find all reactions that need to be removed from negative
+    # Find all reactions that MUST be removed from empty TS dicts.
+    always_rem_idxs = findall(==(Dict{String, Any}()), calc.ts_cache[:xyz])
+    splice!(rd, calc, always_rem_idxs)
+    @info "Removed $(length(always_rem_idxs)) incomplete reactions from CRN."
+    @debug "always_rem_idxs = $(always_rem_idxs)"
+
+    # Find all reactions that should be removed from negative
     # TS symmetry entries. 
     if calc.remove_unconverged
         rem_idxs = findall(==(-1), calc.ts_cache[:symmetry])
