@@ -12,3 +12,6 @@ Kinetica = "3847ce11-53ec-444b-aa85-3b6606472139"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 PythonCall = "6099a3de-0909-46bc-b1f4-468b9a2dfc0d"
 StableHashTraits = "c5dd0088-6c3f-4803-b00e-f31a60c170fa"
+
+[compat]
+Kinetica = "< 0.6"
